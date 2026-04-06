@@ -216,12 +216,15 @@ class DatabaseService {
     }
   }
 
-  private handleOnline(): void {
+private handleOnline(): void {
+    console.log('[Network] Online event - immediate sync');
     this.online = true;
     this.notifySync();
     this.startPeriodicSync();
     this.processOfflineQueue();
     this.pullFromCloud();
+    setTimeout(() => this.processOfflineQueue(), 1000);
+    setTimeout(() => this.pullFromCloud(), 2000);
   }
 
   private handleOffline(): void {
@@ -236,48 +239,67 @@ class DatabaseService {
   }
 
   private async processOfflineQueue(): Promise<void> {
-    if (this.processingQueue || !isOnline()) return;
-    this.processingQueue = true;
+    if (!isOnline()) {
+      console.log('[Queue] Offline, skipping');
+      return;
+    }
+    if (this.processingQueue) {
+      console.log('[Queue] Already processing');
+      return;
+    }
     
+    this.processingQueue = true;
     const queue = loadOfflineQueue();
     console.log(`[Queue] Processing ${queue.length} operations`);
+    
     if (queue.length === 0) {
       this.processingQueue = false;
       return;
     }
 
-    const cloud = await pullCloud();
-    if (cloud && cloud.length > 0) {
-      this.data = normalizeData(cloud);
-      this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    try {
+      const cloud = await pullCloud();
+      if (cloud && cloud.length > 0) {
+        this.data = normalizeData(cloud);
+        this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        saveLocal(this.data);
+        this.notify();
+        console.log('[Queue] Merged cloud data');
+      }
+
+      for (const op of queue) {
+        if (op.type === 'add' && op.data) {
+          if (!this.data.find(t => t._id === op.data!._id)) {
+            this.data = [...this.data, op.data];
+            console.log(`[Queue] Added from queue: ${op.data._id}`);
+          }
+        } else if (op.type === 'update' && op.data) {
+          const idx = this.data.findIndex(t => t._id === op.data!._id);
+          if (idx >= 0) this.data = this.data.map((t, i) => i === idx ? op.data! : t);
+        } else if (op.type === 'delete') {
+          this.data = this.data.filter(t => t._id !== op.id);
+        }
+      }
+
       saveLocal(this.data);
       this.notify();
-    }
 
-    for (const op of queue) {
-      if (op.type === 'add' && op.data) {
-        if (!this.data.find(t => t._id === op.data!._id)) {
-          this.data = [...this.data, op.data];
-          console.log(`[Queue] Added: ${op.data._id}`);
-        }
-      } else if (op.type === 'update' && op.data) {
-        const idx = this.data.findIndex(t => t._id === op.data!._id);
-        if (idx >= 0) this.data = this.data.map((t, i) => i === idx ? op.data! : t);
-      } else if (op.type === 'delete') {
-        this.data = this.data.filter(t => t._id !== op.id);
+      const cloudOk = await pushCloud(this.data);
+      this.synced = cloudOk;
+      console.log(`[Queue] Pushed to cloud: ${cloudOk}`);
+      
+      if (cloudOk) {
+        saveOfflineQueue([]);
+        console.log('[Queue] Queue cleared');
+      } else {
+        console.log('[Queue] Push failed, will retry in 5s');
+        setTimeout(() => this.processOfflineQueue(), 5000);
       }
+    } catch (e) {
+      console.error('[Queue] Error:', e);
+      setTimeout(() => this.processOfflineQueue(), 5000);
     }
-
-    saveLocal(this.data);
-    this.notify();
-
-    const cloudOk = await pushCloud(this.data);
-    this.synced = cloudOk;
-    console.log(`[Queue] Pushed to cloud: ${cloudOk}`);
     
-    if (cloudOk) {
-      saveOfflineQueue([]);
-    }
     this.notifySync();
     this.processingQueue = false;
   }
@@ -379,14 +401,25 @@ class DatabaseService {
     console.log(`[Add] Transaction added: ${safeTx._id}, Online: ${isOnline()}`);
     
     if (isOnline()) {
-      const cloudOk = await pushCloud(this.data);
-      this.synced = cloudOk;
-      this.notifySync();
-      console.log(`[Add] Cloud push: ${cloudOk ? 'OK' : 'FAILED'}`);
-      return { tx: safeTx, success: true, synced: cloudOk };
+      try {
+        const cloudOk = await pushCloud(this.data);
+        this.synced = cloudOk;
+        this.notifySync();
+        console.log(`[Add] Cloud push: ${cloudOk ? 'OK' : 'FAILED'}`);
+        if (!cloudOk) {
+          addToQueue({ id: safeTx._id, type: 'add', data: safeTx, timestamp: Date.now() });
+          console.log('[Add] Push failed, added to queue');
+        }
+        return { tx: safeTx, success: true, synced: cloudOk };
+      } catch (e) {
+        console.error('[Add] Cloud push error:', e);
+        addToQueue({ id: safeTx._id, type: 'add', data: safeTx, timestamp: Date.now() });
+        console.log('[Add] Push error, added to queue');
+        return { tx: safeTx, success: true, synced: false };
+      }
     } else {
       addToQueue({ id: safeTx._id, type: 'add', data: safeTx, timestamp: Date.now() });
-      console.log(`[Add] Queued for later sync`);
+      console.log(`[Add] Offline, added to queue`);
       this.notifySync();
       return { tx: safeTx, success: true, synced: false };
     }
