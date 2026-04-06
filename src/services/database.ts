@@ -156,29 +156,45 @@ class DatabaseService {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => this.handleOnline());
-      window.addEventListener('offline', () => this.handleOffline());
+      window.addEventListener('online', () => {
+        console.log('[Network] Online event');
+        this.handleOnline();
+      });
+      window.addEventListener('offline', () => {
+        console.log('[Network] Offline event');
+        this.handleOffline();
+      });
       window.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') this.pullFromCloud();
+        if (document.visibilityState === 'visible') {
+          console.log('[Visibility] Tab visible, pulling cloud');
+          this.pullFromCloud();
+        }
       });
     }
   }
 
   private async pullFromCloud(): Promise<void> {
     if (!isOnline()) return;
+    console.log('[Sync] Pulling from cloud...');
     const cloud = await pullCloud();
     if (cloud && cloud.length > 0) {
       const cloudData = normalizeData(cloud);
+      const localIds = this.data.map(t => t._id).sort();
+      const cloudIds = cloudData.map(t => t._id).sort();
       const hasChanges = cloudData.length !== this.data.length || 
-        JSON.stringify(cloudData.map(t => t._id).sort()) !== JSON.stringify(this.data.map(t => t._id).sort());
+        JSON.stringify(cloudIds) !== JSON.stringify(localIds);
+      console.log(`[Sync] Cloud: ${cloudData.length}, Local: ${this.data.length}, Changes: ${hasChanges}`);
       if (hasChanges) {
         this.data = cloudData;
         this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
         saveLocal(this.data);
         this.synced = true;
+        console.log('[Sync] Updated from cloud');
         this.notify();
         this.notifySync();
       }
+    } else {
+      console.log('[Sync] No cloud data');
     }
   }
 
@@ -220,6 +236,7 @@ class DatabaseService {
     this.processingQueue = true;
     
     const queue = loadOfflineQueue();
+    console.log(`[Queue] Processing ${queue.length} operations`);
     if (queue.length === 0) {
       this.processingQueue = false;
       return;
@@ -237,6 +254,7 @@ class DatabaseService {
       if (op.type === 'add' && op.data) {
         if (!this.data.find(t => t._id === op.data!._id)) {
           this.data = [...this.data, op.data];
+          console.log(`[Queue] Added: ${op.data._id}`);
         }
       } else if (op.type === 'update' && op.data) {
         const idx = this.data.findIndex(t => t._id === op.data!._id);
@@ -251,6 +269,7 @@ class DatabaseService {
 
     const cloudOk = await pushCloud(this.data);
     this.synced = cloudOk;
+    console.log(`[Queue] Pushed to cloud: ${cloudOk}`);
     
     if (cloudOk) {
       saveOfflineQueue([]);
@@ -344,14 +363,17 @@ class DatabaseService {
     this.data = [...this.data, safeTx];
     saveLocal(this.data);
     this.notify();
+    console.log(`[Add] Transaction added: ${safeTx._id}, Online: ${isOnline()}`);
     
     if (isOnline()) {
       const cloudOk = await pushCloud(this.data);
       this.synced = cloudOk;
       this.notifySync();
+      console.log(`[Add] Cloud push: ${cloudOk ? 'OK' : 'FAILED'}`);
       return { tx: safeTx, success: true, synced: cloudOk };
     } else {
       addToQueue({ id: safeTx._id, type: 'add', data: safeTx, timestamp: Date.now() });
+      console.log(`[Add] Queued for later sync`);
       this.notifySync();
       return { tx: safeTx, success: true, synced: false };
     }
