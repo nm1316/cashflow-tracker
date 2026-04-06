@@ -26,7 +26,7 @@ export interface SyncStatus {
   syncing: boolean;
   lastSync: Date | null;
   error: string | null;
-  connected: boolean;
+  connected?: boolean;
 }
 
 export interface NewTransaction {

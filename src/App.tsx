@@ -324,7 +324,8 @@ export default function App({ onLogout }: { onLogout: () => void }) {
     return false;
   });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [syncStatus, setSyncStatus] = useState<'cloud' | 'local'>('local');
+  const [syncStatus, setSyncStatus] = useState<'cloud' | 'local' | 'offline'>('local');
+  const [pendingCount, setPendingCount] = useState(0);
   const [showExport, setShowExport] = useState(false);
 
   useEffect(() => {
@@ -344,7 +345,16 @@ export default function App({ onLogout }: { onLogout: () => void }) {
     });
     const unsub = db.subscribe(setAllTransactions);
     const unsubSync = db.onSyncStatusChange((status) => {
-      setSyncStatus(status.connected ? 'cloud' : 'local');
+      if (!status.connected && status.error?.includes('Offline')) {
+        setSyncStatus('offline');
+      } else if (status.error?.includes('pending')) {
+        setSyncStatus('local');
+        const match = status.error.match(/(\d+)/);
+        setPendingCount(match ? parseInt(match[1]) : 0);
+      } else {
+        setSyncStatus(status.connected ? 'cloud' : 'local');
+        setPendingCount(0);
+      }
     });
     
     return () => { unsub(); unsubSync(); };
@@ -463,13 +473,19 @@ export default function App({ onLogout }: { onLogout: () => void }) {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-semibold ${syncStatus === 'cloud' ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400'}`}>
+            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-semibold ${
+              syncStatus === 'cloud' ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400' : 
+              syncStatus === 'offline' ? 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-400' : 
+              'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400'
+            }`}>
               {syncStatus === 'cloud' ? (
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+              ) : syncStatus === 'offline' ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
               ) : (
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 0 1-9 9m0 0A9 9 0 0 1 3 12m9 9a9 9 0 0 0 9-9m-9 9a9 9 0 0 1-9-9"/><path d="M21 12c0 0-3.5-3-7-5"/></svg>
               )}
-              {syncStatus === 'cloud' ? 'Synced' : 'Local'}
+              {syncStatus === 'cloud' ? 'Synced' : syncStatus === 'offline' ? 'Offline' : pendingCount > 0 ? `${pendingCount} Pending` : 'Local'}
             </div>
             <button onClick={() => { const data = db.exportData(); const blob = new Blob([data], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `cashflow-backup-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-500 px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
