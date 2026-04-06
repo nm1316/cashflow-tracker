@@ -5,13 +5,14 @@ const JSONBIN_BIN_ID = '69d223dd856a682189ff28c7';
 const JSONBIN_API_KEY = '$2a$10$QwwAuP12n..jYPPFfwVAZuEzgLY3mtZLdcE.Pac5OV/U12k8AQFqG';
 const LOCAL_KEY = 'cashflow_main';
 const SYNC_KEY = 'cashflow_last_sync';
-const OFFLINE_QUEUE_KEY = 'cashflow_offline_queue';
+const QUEUE_KEY = 'cashflow_queue';
+const LAST_CLOUD_HASH_KEY = 'cashflow_cloud_hash';
 
-interface QueuedOperation {
+interface QueuedOp {
   id: string;
   type: 'add' | 'update' | 'delete';
   data?: Transaction;
-  timestamp: number;
+  ts: number;
 }
 
 export function convertToEUR(aed: number): number {
@@ -19,7 +20,7 @@ export function convertToEUR(aed: number): number {
 }
 
 export function convertToDZD(aed: number): number {
-  return Math.round(aed * 60 * 100) / 100;
+  return Math.round((aed * 60) * 100) / 100;
 }
 
 export function formatAED(amount: number): string {
@@ -52,44 +53,40 @@ function getInitialData(): Transaction[] {
 }
 
 function saveLocal(data: Transaction[]): void {
-  try {
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
-    localStorage.setItem(SYNC_KEY, Date.now().toString());
-  } catch (e) {
-    console.error('Save error:', e);
-  }
+  localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
+  localStorage.setItem(SYNC_KEY, Date.now().toString());
 }
 
 function loadLocal(): Transaction[] {
   try {
-    const stored = localStorage.getItem(LOCAL_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
-      }
-    }
-  } catch (e) {
-    console.error('Load error:', e);
-  }
+    const s = localStorage.getItem(LOCAL_KEY);
+    if (s) { const p = JSON.parse(s); if (Array.isArray(p) && p.length > 0) return p; }
+  } catch {}
   return [];
+}
+
+function getCloudHash(data: Transaction[]): string {
+  return data.map(t => t._id).sort().join(',');
+}
+
+function saveCloudHash(hash: string): void {
+  localStorage.setItem(LAST_CLOUD_HASH_KEY, hash);
+}
+
+function getCloudHashStored(): string {
+  return localStorage.getItem(LAST_CLOUD_HASH_KEY) || '';
 }
 
 async function pushCloud(data: Transaction[]): Promise<boolean> {
   try {
     const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Master-Key': JSONBIN_API_KEY,
-      },
+      headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
       body: JSON.stringify(data),
     });
-    return res.ok;
-  } catch (e) {
-    console.error('Cloud push error:', e);
-    return false;
-  }
+    if (res.ok) { saveCloudHash(getCloudHash(data)); return true; }
+  } catch {}
+  return false;
 }
 
 async function pullCloud(): Promise<Transaction[] | null> {
@@ -99,416 +96,211 @@ async function pullCloud(): Promise<Transaction[] | null> {
       headers: { 'X-Master-Key': JSONBIN_API_KEY },
     });
     if (res.ok) {
-      const result = await res.json();
-      if (result.record && Array.isArray(result.record) && result.record.length > 0) {
-        return result.record;
-      }
+      const r = await res.json();
+      if (r.record && Array.isArray(r.record) && r.record.length > 0) return r.record;
     }
-  } catch (e) {
-    console.error('Cloud pull error:', e);
-  }
+  } catch {}
   return null;
 }
 
-function normalizeData(data: Transaction[]): Transaction[] {
-  return data.map(t => ({
-    ...t,
-    paymentMethod: t.paymentMethod === 'Cash' ? 'Cash' : 'Card'
-  }));
+function normalize(data: Transaction[]): Transaction[] {
+  return data.map(t => ({ ...t, paymentMethod: t.paymentMethod === 'Cash' ? 'Cash' : 'Card' }));
 }
 
-function loadOfflineQueue(): QueuedOperation[] {
-  try {
-    const stored = localStorage.getItem(OFFLINE_QUEUE_KEY);
-    if (stored) return JSON.parse(stored);
-  } catch (e) {}
-  return [];
+function loadQueue(): QueuedOp[] {
+  try { const s = localStorage.getItem(QUEUE_KEY); return s ? JSON.parse(s) : []; } catch { return []; }
 }
 
-function saveOfflineQueue(queue: QueuedOperation[]): void {
-  localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+function saveQueue(q: QueuedOp[]): void {
+  localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
 }
 
-function addToQueue(op: QueuedOperation): void {
-  const queue = loadOfflineQueue();
-  queue.push(op);
-  saveOfflineQueue(queue);
+function queueOp(op: QueuedOp): void {
+  const q = loadQueue();
+  if (!q.find(o => o.id === op.id)) { q.push(op); saveQueue(q); }
 }
 
-function removeFromQueue(id: string): void {
-  const queue = loadOfflineQueue().filter(op => op.id !== id);
-  saveOfflineQueue(queue);
-}
-
-function isOnline(): boolean {
+function online(): boolean {
   return typeof navigator !== 'undefined' ? navigator.onLine : true;
 }
 
-class DatabaseService {
-  private listeners: Set<(txns: Transaction[]) => void> = new Set();
-  private syncListeners: Set<(status: SyncStatus) => void> = new Set();
+class DB {
+  private ls: Set<(t: Transaction[]) => void> = new Set();
+  private ss: Set<(s: SyncStatus) => void> = new Set();
   private data: Transaction[] = [];
   private ready = false;
-  private synced = false;
-  private online = true;
-  private processingQueue = false;
-  private syncInterval: ReturnType<typeof setInterval> | null = null;
+  private syncing = false;
+  private interval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => {
-        console.log('[Network] Online event');
-        this.handleOnline();
-      });
-      window.addEventListener('offline', () => {
-        console.log('[Network] Offline event');
-        this.handleOffline();
-      });
-      window.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-          console.log('[Visibility] Tab visible, pulling cloud');
-          this.pullFromCloud();
-        }
+      window.addEventListener('online', () => this.onNet(true));
+      window.addEventListener('offline', () => this.onNet(false));
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') this.sync();
       });
     }
   }
 
-  private async pullFromCloud(): Promise<void> {
-    if (!isOnline()) return;
-    console.log('[Sync] Pulling from cloud...');
-    const cloud = await pullCloud();
-    if (cloud && cloud.length > 0) {
-      const cloudData = normalizeData(cloud);
-      const localIds = this.data.map(t => t._id).sort();
-      const cloudIds = cloudData.map(t => t._id).sort();
-      const hasChanges = cloudData.length !== this.data.length || 
-        JSON.stringify(cloudIds) !== JSON.stringify(localIds);
-      console.log(`[Sync] Cloud: ${cloudData.length}, Local: ${this.data.length}, Changes: ${hasChanges}`);
-      if (hasChanges) {
-        this.data = cloudData;
-        this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        saveLocal(this.data);
-        this.synced = true;
-        console.log('[Sync] Updated from cloud');
-        this.notify();
-        this.notifySync();
-      }
-    } else {
-      console.log('[Sync] No cloud data');
-    }
+  private onNet(is: boolean): void {
+    if (is) this.sync();
   }
 
-  private startPeriodicSync(): void {
-    if (this.syncInterval) return;
-    console.log('[PeriodicSync] Starting 10s sync interval');
-    this.syncInterval = setInterval(() => {
-      if (isOnline()) {
-        console.log('[PeriodicSync] Running sync check');
-        this.pullFromCloud();
-      }
-    }, 10000);
-  }
-
-  private stopPeriodicSync(): void {
-    if (this.syncInterval) {
-      clearInterval(this.syncInterval);
-      this.syncInterval = null;
-    }
-  }
-
-private handleOnline(): void {
-    console.log('[Network] Online event - immediate sync');
-    this.online = true;
-    this.notifySync();
-    this.startPeriodicSync();
-    this.processOfflineQueue();
-    this.pullFromCloud();
-    setTimeout(() => this.processOfflineQueue(), 1000);
-    setTimeout(() => this.pullFromCloud(), 2000);
-  }
-
-  private handleOffline(): void {
-    this.online = false;
-    this.stopPeriodicSync();
-    this.notifySync();
-  }
-
-  private handleOffline(): void {
-    this.online = false;
-    this.notifySync();
-  }
-
-  private async processOfflineQueue(): Promise<void> {
-    if (!isOnline()) {
-      console.log('[Queue] Offline, skipping');
-      return;
-    }
-    if (this.processingQueue) {
-      console.log('[Queue] Already processing');
-      return;
-    }
-    
-    this.processingQueue = true;
-    const queue = loadOfflineQueue();
-    console.log(`[Queue] Processing ${queue.length} operations`);
-    
-    if (queue.length === 0) {
-      this.processingQueue = false;
-      return;
-    }
+  private async sync(): Promise<void> {
+    if (this.syncing || !online()) return;
+    this.syncing = true;
+    this.notifyS({ syncing: true, lastSync: null, connected: true, error: null });
 
     try {
       const cloud = await pullCloud();
-      if (cloud && cloud.length > 0) {
-        this.data = normalizeData(cloud);
-        this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        saveLocal(this.data);
-        this.notify();
-        console.log('[Queue] Merged cloud data');
-      }
+      const q = loadQueue();
+      let changed = false;
 
-      for (const op of queue) {
-        if (op.type === 'add' && op.data) {
-          if (!this.data.find(t => t._id === op.data!._id)) {
-            this.data = [...this.data, op.data];
-            console.log(`[Queue] Added from queue: ${op.data._id}`);
+      if (cloud && cloud.length > 0) {
+        const cData = normalize(cloud);
+        const cIds = cData.map(t => t._id).sort().join(',');
+        const lIds = this.data.map(t => t._id).sort().join(',');
+
+        if (cIds !== lIds) {
+          for (const t of cData) {
+            if (!this.data.find(x => x._id === t._id)) { this.data.push(t); changed = true; }
           }
-        } else if (op.type === 'update' && op.data) {
-          const idx = this.data.findIndex(t => t._id === op.data!._id);
-          if (idx >= 0) this.data = this.data.map((t, i) => i === idx ? op.data! : t);
-        } else if (op.type === 'delete') {
-          this.data = this.data.filter(t => t._id !== op.id);
+          for (const t of this.data) {
+            if (!cData.find(x => x._id === t._id)) { this.data = this.data.filter(x => x._id !== t._id); changed = true; }
+          }
+          for (const t of this.data) {
+            const c = cData.find(x => x._id === t._id);
+            if (c) {
+              const ci = cData.indexOf(c);
+              const ti = this.data.indexOf(t);
+              if (ci !== ti) { this.data[ti] = c; changed = true; }
+            }
+          }
         }
       }
 
-      saveLocal(this.data);
-      this.notify();
-
-      const cloudOk = await pushCloud(this.data);
-      this.synced = cloudOk;
-      console.log(`[Queue] Pushed to cloud: ${cloudOk}`);
-      
-      if (cloudOk) {
-        saveOfflineQueue([]);
-        console.log('[Queue] Queue cleared');
-      } else {
-        console.log('[Queue] Push failed, will retry in 5s');
-        setTimeout(() => this.processOfflineQueue(), 5000);
+      for (const op of q) {
+        if (op.type === 'add' && op.data) {
+          if (!this.data.find(t => t._id === op.data!._id)) { this.data.push(op.data); changed = true; }
+        } else if (op.type === 'update' && op.data) {
+          const i = this.data.findIndex(t => t._id === op.data!._id);
+          if (i >= 0) { this.data[i] = op.data; changed = true; }
+        } else if (op.type === 'delete') {
+          if (this.data.find(t => t._id === op.id)) { this.data = this.data.filter(t => t._id !== op.id); changed = true; }
+        }
       }
-    } catch (e) {
-      console.error('[Queue] Error:', e);
-      setTimeout(() => this.processOfflineQueue(), 5000);
-    }
-    
-    this.notifySync();
-    this.processingQueue = false;
+
+      if (changed || q.length > 0) {
+        this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        const pushed = await pushCloud(this.data);
+        if (pushed) {
+          saveLocal(this.data);
+          saveQueue([]);
+          this.notify();
+        }
+      }
+    } catch (e) { console.error('[Sync] Error:', e); }
+
+    const qLen = loadQueue().length;
+    this.notifyS({ syncing: false, lastSync: new Date(), connected: true, error: qLen > 0 ? `${qLen} pending` : null });
+    this.syncing = false;
   }
 
   async init(): Promise<void> {
     if (this.ready) return;
-    console.log('[Init] Starting database service');
     
-    this.online = isOnline();
-    console.log(`[Init] Online: ${this.online}`);
+    this.data = loadLocal();
+    if (this.data.length === 0) this.data = normalize(getInitialData());
     
     const cloud = await pullCloud();
-    const local = loadLocal();
-    const queue = loadOfflineQueue();
-    const initial = getInitialData();
-    
-    console.log(`[Init] Cloud: ${cloud?.length || 0}, Local: ${local.length}, Queue: ${queue.length}`);
-    
     if (cloud && cloud.length > 0) {
-      this.data = normalizeData(cloud);
-      this.synced = true;
-      saveLocal(this.data);
-      console.log('[Init] Loaded from cloud');
-    } else if (local.length > 0) {
-      this.data = normalizeData(local);
-      saveLocal(this.data);
-      this.synced = await pushCloud(this.data);
-      console.log('[Init] Loaded from local, pushed to cloud');
-    } else {
-      this.data = normalizeData(initial);
-      saveLocal(this.data);
-      this.synced = await pushCloud(this.data);
-      console.log('[Init] Loaded initial data');
+      this.data = normalize(cloud);
     }
-    
-    for (const op of queue) {
-      if (op.type === 'add' && op.data && !this.data.find(t => t._id === op.data!._id)) {
-        this.data = [...this.data, op.data];
-      } else if (op.type === 'update' && op.data) {
-        const idx = this.data.findIndex(t => t._id === op.data!._id);
-        if (idx >= 0) this.data = this.data.map((t, i) => i === idx ? op.data! : t);
-      } else if (op.type === 'delete') {
-        this.data = this.data.filter(t => t._id !== op.id);
-      }
+
+    const q = loadQueue();
+    for (const op of q) {
+      if (op.type === 'add' && op.data && !this.data.find(t => t._id === op.data._id)) this.data.push(op.data);
+      else if (op.type === 'update' && op.data) { const i = this.data.findIndex(t => t._id === op.data._id); if (i >= 0) this.data[i] = op.data; }
+      else if (op.type === 'delete') this.data = this.data.filter(t => t._id !== op.id);
     }
     
     this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    saveLocal(this.data);
     
     this.ready = true;
-    console.log(`[Init] Ready with ${this.data.length} transactions`);
     this.notify();
-    this.notifySync();
-    this.startPeriodicSync();
-    
-    if (this.online) this.processOfflineQueue();
+    this.startSync();
+    this.sync();
   }
 
-  private notify(): void {
-    this.listeners.forEach(cb => cb([...this.data]));
+  private startSync(): void {
+    if (this.interval) return;
+    this.interval = setInterval(() => this.sync(), 5000);
   }
 
-  private notifySync(): void {
-    const queueLen = loadOfflineQueue().length;
-    const status: SyncStatus = {
-      syncing: false,
-      lastSync: localStorage.getItem(SYNC_KEY) ? new Date(parseInt(localStorage.getItem(SYNC_KEY)!)) : null,
-      connected: this.online && this.synced,
-      error: !this.online ? 'Offline - will sync when online' : queueLen > 0 ? `${queueLen} pending` : null
-    };
-    this.syncListeners.forEach(cb => cb(status));
+  private stopSync(): void {
+    if (this.interval) { clearInterval(this.interval); this.interval = null; }
   }
 
-  subscribe(callback: (txns: Transaction[]) => void): () => void {
-    this.listeners.add(callback);
-    callback([...this.data]);
-    return () => this.listeners.delete(callback);
-  }
+  private notify(): void { this.ls.forEach(cb => cb([...this.data])); }
+  private notifyS(s: SyncStatus): void { this.ss.forEach(cb => cb(s)); }
 
-  onSyncStatusChange(callback: (status: SyncStatus) => void): () => void {
-    this.syncListeners.add(callback);
-    callback({
-      syncing: false,
-      lastSync: localStorage.getItem(SYNC_KEY) ? new Date(parseInt(localStorage.getItem(SYNC_KEY)!)) : null,
-      connected: this.online && this.synced,
-      error: null
-    });
-    return () => this.syncListeners.delete(callback);
-  }
-
-  getAllTransactions(): Transaction[] {
-    return [...this.data];
-  }
+  subscribe(cb: (t: Transaction[]) => void): () => void { this.ls.add(cb); cb([...this.data]); return () => this.ls.delete(cb); }
+  onSyncStatusChange(cb: (s: SyncStatus) => void): () => void { this.ss.add(cb); cb({ syncing: false, lastSync: null, connected: online(), error: null }); return () => this.ss.delete(cb); }
+  getAllTransactions(): Transaction[] { return [...this.data]; }
 
   async addTransaction(tx: Transaction): Promise<{ tx: Transaction; success: boolean; synced: boolean }> {
-    const safeTx = { ...tx, paymentMethod: tx.paymentMethod || 'Card' };
-    this.data = [...this.data, safeTx];
+    const t = { ...tx, paymentMethod: tx.paymentMethod || 'Card' };
+    this.data = [...this.data, t];
     saveLocal(this.data);
     this.notify();
-    console.log(`[Add] Transaction added: ${safeTx._id}, Online: ${isOnline()}`);
     
-    if (isOnline()) {
-      try {
-        const cloudOk = await pushCloud(this.data);
-        this.synced = cloudOk;
-        this.notifySync();
-        console.log(`[Add] Cloud push: ${cloudOk ? 'OK' : 'FAILED'}`);
-        if (!cloudOk) {
-          addToQueue({ id: safeTx._id, type: 'add', data: safeTx, timestamp: Date.now() });
-          console.log('[Add] Push failed, added to queue');
-        }
-        return { tx: safeTx, success: true, synced: cloudOk };
-      } catch (e) {
-        console.error('[Add] Cloud push error:', e);
-        addToQueue({ id: safeTx._id, type: 'add', data: safeTx, timestamp: Date.now() });
-        console.log('[Add] Push error, added to queue');
-        return { tx: safeTx, success: true, synced: false };
-      }
-    } else {
-      addToQueue({ id: safeTx._id, type: 'add', data: safeTx, timestamp: Date.now() });
-      console.log(`[Add] Offline, added to queue`);
-      this.notifySync();
-      return { tx: safeTx, success: true, synced: false };
-    }
+    const ok = online() ? await pushCloud(this.data) : false;
+    if (ok) saveQueue([]);
+    else queueOp({ id: t._id, type: 'add', data: t, ts: Date.now() });
+    
+    this.notifyS({ syncing: false, lastSync: new Date(), connected: online(), error: ok ? null : 'Pending sync' });
+    return { tx: t, success: true, synced: ok };
   }
 
   async updateTransaction(tx: Transaction): Promise<Transaction> {
-    const safeTx = { ...tx, paymentMethod: tx.paymentMethod || 'Card' };
-    const idx = this.data.findIndex(t => t._id === tx._id);
-    if (idx >= 0) {
-      this.data = this.data.map((t, i) => i === idx ? safeTx : t);
+    const t = { ...tx, paymentMethod: tx.paymentMethod || 'Card' };
+    const i = this.data.findIndex(x => x._id === tx._id);
+    if (i >= 0) {
+      this.data = this.data.map((x, j) => j === i ? t : x);
       saveLocal(this.data);
       this.notify();
-      
-      if (isOnline()) {
-        const cloudOk = await pushCloud(this.data);
-        this.synced = cloudOk;
-        this.notifySync();
-      } else {
-        addToQueue({ id: safeTx._id, type: 'update', data: safeTx, timestamp: Date.now() });
-        this.notifySync();
-      }
+      const ok = online() ? await pushCloud(this.data) : false;
+      if (!ok) queueOp({ id: t._id, type: 'update', data: t, ts: Date.now() });
     }
-    return safeTx;
+    return t;
   }
 
   async deleteTransaction(id: string): Promise<void> {
-    this.data = this.data.filter(t => t._id !== id);
+    this.data = this.data.filter(x => x._id !== id);
     saveLocal(this.data);
     this.notify();
-    
-    if (isOnline()) {
-      const cloudOk = await pushCloud(this.data);
-      this.synced = cloudOk;
-      this.notifySync();
-    } else {
-      addToQueue({ id, type: 'delete', timestamp: Date.now() });
-      this.notifySync();
-    }
+    const ok = online() ? await pushCloud(this.data) : false;
+    if (!ok) queueOp({ id, type: 'delete', ts: Date.now() });
   }
 
-  exportData(): string {
-    return JSON.stringify(this.data, null, 2);
-  }
+  exportData(): string { return JSON.stringify(this.data, null, 2); }
 
-  async importData(jsonStr: string): Promise<boolean> {
+  async importData(json: string): Promise<boolean> {
     try {
-      const parsed = JSON.parse(jsonStr);
-      if (Array.isArray(parsed)) {
-        this.data = normalizeData(parsed);
+      const p = JSON.parse(json);
+      if (Array.isArray(p)) {
+        this.data = normalize(p);
         saveLocal(this.data);
         this.notify();
-        
-        const cloudOk = await pushCloud(this.data);
-        this.synced = cloudOk;
-        this.notifySync();
+        await pushCloud(this.data);
         return true;
       }
-    } catch (e) {
-      console.error('Import error:', e);
-    }
+    } catch {}
     return false;
   }
 
-  async refresh(): Promise<void> {
-    console.log('[Refresh] Manual refresh triggered');
-    if (!isOnline()) {
-      console.log('[Refresh] Offline, skipping');
-      return;
-    }
-    const cloud = await pullCloud();
-    if (cloud && cloud.length > 0) {
-      this.data = normalizeData(cloud);
-      const queue = loadOfflineQueue();
-      for (const op of queue) {
-        if (op.type === 'add' && op.data && !this.data.find(t => t._id === op.data!._id)) {
-          this.data = [...this.data, op.data];
-        } else if (op.type === 'update' && op.data) {
-          const idx = this.data.findIndex(t => t._id === op.data!._id);
-          if (idx >= 0) this.data = this.data.map((t, i) => i === idx ? op.data! : t);
-        } else if (op.type === 'delete') {
-          this.data = this.data.filter(t => t._id !== op.id);
-        }
-      }
-      this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-      saveLocal(this.data);
-      this.notify();
-    }
-    await this.processOfflineQueue();
-  }
+  async refresh(): Promise<void> { await this.sync(); }
 }
 
-export const db = new DatabaseService();
+export const db = new DB();
