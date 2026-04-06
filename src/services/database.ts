@@ -118,35 +118,40 @@ class DB {
   private ss: Set<(s: SyncStatus) => void> = new Set();
   private data: Transaction[] = [];
   private ready = false;
-  private syncing = false;
-  private syncInterval: ReturnType<typeof setInterval> | null = null;
+  private isSyncing = false;
+  private syncTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => this.onOnline());
-      window.addEventListener('offline', () => this.onOffline());
+      window.addEventListener('online', () => this.handleOnline());
+      window.addEventListener('offline', () => this.handleOffline());
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') this.sync();
+        if (document.visibilityState === 'visible') this.scheduleSync();
       });
-      window.addEventListener('focus', () => this.sync());
+      window.addEventListener('focus', () => this.scheduleSync());
     }
   }
 
-  private onOnline(): void {
-    this.sync();
-    setTimeout(() => this.sync(), 2000);
-    setTimeout(() => this.sync(), 5000);
+  private handleOnline(): void {
+    this.scheduleSync();
+    setTimeout(() => this.scheduleSync(), 1000);
+    setTimeout(() => this.scheduleSync(), 3000);
   }
 
-  private onOffline(): void {
+  private handleOffline(): void {
     this.notifyS({ syncing: false, lastSync: null, connected: false, error: 'Offline' });
   }
 
-  private async sync(): Promise<void> {
-    if (this.syncing) return;
+  private scheduleSync(): void {
+    if (this.syncTimer) clearTimeout(this.syncTimer);
+    this.syncTimer = setTimeout(() => this.doSync(), 500);
+  }
+
+  private async doSync(): Promise<void> {
+    if (this.isSyncing) return;
     if (!online()) return;
     
-    this.syncing = true;
+    this.isSyncing = true;
     this.notifyS({ syncing: true, lastSync: null, connected: true, error: null });
 
     try {
@@ -156,38 +161,35 @@ class DB {
 
       if (cloud && cloud.length > 0) {
         const cloudData = normalize(cloud);
-        
+        const cloudIds = new Set(cloudData.map(t => t._id));
+        const localIds = new Set(this.data.map(t => t._id));
+
         for (const t of cloudData) {
-          if (!this.data.find(x => x._id === t._id)) { 
-            this.data.push(t); 
-            changed = true; 
+          if (!localIds.has(t._id)) {
+            this.data.push(t);
+            changed = true;
           }
         }
-        
-        for (const t of [...this.data]) {
-          if (!cloudData.find(x => x._id === t._id)) { 
-            this.data = this.data.filter(x => x._id !== t._id); 
-            changed = true; 
+
+        for (const t of this.data) {
+          if (!cloudIds.has(t._id) && !queue.find(q => q.type === 'add' && q.data?._id === t._id)) {
+            // Keep local-only transactions
           }
         }
       }
 
-      if (queue.length > 0) {
-        for (const op of queue) {
-          if (op.type === 'add' && op.data) {
-            if (!this.data.find(t => t._id === op.data._id)) { 
-              this.data.push(op.data); 
-              changed = true; 
-            }
-          } else if (op.type === 'update' && op.data) {
-            const i = this.data.findIndex(t => t._id === op.data._id);
-            if (i >= 0) { this.data[i] = op.data; changed = true; }
-          } else if (op.type === 'delete') {
-            if (this.data.find(t => t._id === op.id)) { 
-              this.data = this.data.filter(t => t._id !== op.id); 
-              changed = true; 
-            }
+      for (const op of queue) {
+        if (op.type === 'add' && op.data) {
+          if (!this.data.find(t => t._id === op.data._id)) {
+            this.data.push(op.data);
+            changed = true;
           }
+        } else if (op.type === 'update' && op.data) {
+          const i = this.data.findIndex(t => t._id === op.data._id);
+          if (i >= 0) { this.data[i] = op.data; changed = true; }
+        } else if (op.type === 'delete') {
+          this.data = this.data.filter(t => t._id !== op.id);
+          changed = true;
         }
       }
 
@@ -199,14 +201,14 @@ class DB {
       
       if (pushed) {
         saveLocal(this.data);
-        if (queue.length > 0) saveQueue([]);
-        this.notify();
+        saveQueue([]);
+        if (changed) this.notify();
       }
     } catch (e) { console.error('[Sync] Error:', e); }
 
     const qLen = loadQueue().length;
     this.notifyS({ syncing: false, lastSync: new Date(), connected: true, error: qLen > 0 ? `${qLen} pending` : null });
-    this.syncing = false;
+    this.isSyncing = false;
   }
 
   async init(): Promise<void> {
@@ -234,9 +236,8 @@ class DB {
     this.ready = true;
     this.notify();
     
-    if (this.syncInterval) clearInterval(this.syncInterval);
-    this.syncInterval = setInterval(() => this.sync(), 3000);
-    this.sync();
+    setInterval(() => this.scheduleSync(), 5000);
+    this.scheduleSync();
   }
 
   private notify(): void { this.ls.forEach(cb => cb([...this.data])); }
@@ -248,23 +249,27 @@ class DB {
 
   async addTransaction(tx: Transaction): Promise<{ tx: Transaction; success: boolean; synced: boolean }> {
     const t = { ...tx, paymentMethod: tx.paymentMethod || 'Card' };
+    
     this.data = [...this.data, t];
     saveLocal(this.data);
     this.notify();
     
-    const ok = online() ? await pushCloud(this.data) : false;
-    
-    if (ok) {
-      saveQueue([]);
-      this.sync();
+    if (online()) {
+      const ok = await pushCloud(this.data);
+      if (ok) {
+        saveQueue([]);
+      } else {
+        queueOp({ id: t._id, type: 'add', data: t, ts: Date.now() });
+      }
+      this.scheduleSync();
+      const qLen = loadQueue().length;
+      this.notifyS({ syncing: false, lastSync: new Date(), connected: true, error: qLen > 0 ? `${qLen} pending` : null });
+      return { tx: t, success: true, synced: ok };
     } else {
       queueOp({ id: t._id, type: 'add', data: t, ts: Date.now() });
-      this.sync();
+      this.notifyS({ syncing: false, lastSync: null, connected: false, error: 'Offline - saved locally' });
+      return { tx: t, success: true, synced: false };
     }
-    
-    const qLen = loadQueue().length;
-    this.notifyS({ syncing: false, lastSync: new Date(), connected: online(), error: ok ? null : `${qLen} pending` });
-    return { tx: t, success: true, synced: ok };
   }
 
   async updateTransaction(tx: Transaction): Promise<Transaction> {
@@ -274,9 +279,12 @@ class DB {
       this.data = this.data.map((x, j) => j === i ? t : x);
       saveLocal(this.data);
       this.notify();
-      if (online()) await pushCloud(this.data);
-      else queueOp({ id: t._id, type: 'update', data: t, ts: Date.now() });
-      this.sync();
+      if (online()) {
+        await pushCloud(this.data);
+        this.scheduleSync();
+      } else {
+        queueOp({ id: t._id, type: 'update', data: t, ts: Date.now() });
+      }
     }
     return t;
   }
@@ -285,9 +293,12 @@ class DB {
     this.data = this.data.filter(x => x._id !== id);
     saveLocal(this.data);
     this.notify();
-    if (online()) await pushCloud(this.data);
-    else queueOp({ id, type: 'delete', ts: Date.now() });
-    this.sync();
+    if (online()) {
+      await pushCloud(this.data);
+      this.scheduleSync();
+    } else {
+      queueOp({ id, type: 'delete', ts: Date.now() });
+    }
   }
 
   exportData(): string { return JSON.stringify(this.data, null, 2); }
@@ -306,7 +317,7 @@ class DB {
     return false;
   }
 
-  async refresh(): Promise<void> { await this.sync(); }
+  async refresh(): Promise<void> { this.scheduleSync(); }
 }
 
 export const db = new DB();
