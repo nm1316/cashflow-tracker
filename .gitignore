@@ -7,3 +7,6 @@ dist
 upload-*.cjs
 upload-*.js
 reset.js
+*.local
+secrets.json
+credentials.json
