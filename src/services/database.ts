@@ -152,18 +152,62 @@ class DatabaseService {
   private synced = false;
   private online = true;
   private processingQueue = false;
+  private syncInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => this.handleOnline());
       window.addEventListener('offline', () => this.handleOffline());
+      window.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') this.pullFromCloud();
+      });
+    }
+  }
+
+  private async pullFromCloud(): Promise<void> {
+    if (!isOnline()) return;
+    const cloud = await pullCloud();
+    if (cloud && cloud.length > 0) {
+      const cloudData = normalizeData(cloud);
+      const hasChanges = cloudData.length !== this.data.length || 
+        JSON.stringify(cloudData.map(t => t._id).sort()) !== JSON.stringify(this.data.map(t => t._id).sort());
+      if (hasChanges) {
+        this.data = cloudData;
+        this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        saveLocal(this.data);
+        this.synced = true;
+        this.notify();
+        this.notifySync();
+      }
+    }
+  }
+
+  private startPeriodicSync(): void {
+    if (this.syncInterval) return;
+    this.syncInterval = setInterval(() => {
+      if (isOnline()) this.pullFromCloud();
+    }, 10000);
+  }
+
+  private stopPeriodicSync(): void {
+    if (this.syncInterval) {
+      clearInterval(this.syncInterval);
+      this.syncInterval = null;
     }
   }
 
   private handleOnline(): void {
     this.online = true;
     this.notifySync();
+    this.startPeriodicSync();
     this.processOfflineQueue();
+    this.pullFromCloud();
+  }
+
+  private handleOffline(): void {
+    this.online = false;
+    this.stopPeriodicSync();
+    this.notifySync();
   }
 
   private handleOffline(): void {
@@ -254,6 +298,7 @@ class DatabaseService {
     this.ready = true;
     this.notify();
     this.notifySync();
+    this.startPeriodicSync();
     
     if (this.online) this.processOfflineQueue();
   }
