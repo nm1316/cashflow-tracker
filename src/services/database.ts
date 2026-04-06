@@ -5,6 +5,7 @@ const JSONBIN_BIN_ID = '69d223dd856a682189ff28c7';
 const JSONBIN_API_KEY = '$2a$10$QwwAuP12n..jYPPFfwVAZuEzgLY3mtZLdcE.Pac5OV/U12k8AQFqG';
 const LOCAL_KEY = 'cashflow_data';
 const QUEUE_KEY = 'cashflow_queue';
+const LAST_COUNT_KEY = 'cashflow_last_count';
 
 interface QueuedOp {
   id: string;
@@ -52,6 +53,7 @@ function getInitialData(): Transaction[] {
 
 function saveLocal(data: Transaction[]): void {
   localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
+  localStorage.setItem(LAST_COUNT_KEY, data.length.toString());
 }
 
 function loadLocal(): Transaction[] {
@@ -65,6 +67,10 @@ function loadLocal(): Transaction[] {
   return [];
 }
 
+function getLastCount(): number {
+  return parseInt(localStorage.getItem(LAST_COUNT_KEY) || '0');
+}
+
 async function pushCloud(data: Transaction[]): Promise<boolean> {
   try {
     const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
@@ -72,15 +78,13 @@ async function pushCloud(data: Transaction[]): Promise<boolean> {
       headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
       body: JSON.stringify(data),
     });
-    console.log('[Cloud] Push result:', res.ok, res.status);
     return res.ok;
-  } catch (e) {
-    console.log('[Cloud] Push error:', e);
+  } catch {
     return false;
   }
 }
 
-async function pullCloud(): Promise<Transaction[] | null> {
+async function pullCloud(): Promise<{ data: Transaction[] | null; count: number }> {
   try {
     const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, {
       method: 'GET',
@@ -88,13 +92,14 @@ async function pullCloud(): Promise<Transaction[] | null> {
     });
     if (res.ok) {
       const r = await res.json();
-      console.log('[Cloud] Pull result:', r.record?.length || 0, 'transactions');
-      if (r.record && Array.isArray(r.record) && r.record.length > 0) return r.record;
+      const count = parseInt(res.headers.get('X-Bin-Length') || '0');
+      if (r.record && Array.isArray(r.record) && r.record.length > 0) {
+        return { data: r.record, count };
+      }
+      return { data: null, count };
     }
-  } catch (e) {
-    console.log('[Cloud] Pull error:', e);
-  }
-  return null;
+  } catch {}
+  return { data: null, count: 0 };
 }
 
 function normalize(data: Transaction[]): Transaction[] {
@@ -111,7 +116,7 @@ function saveQueue(q: QueuedOp[]): void {
 
 function queueOp(op: QueuedOp): void {
   const q = loadQueue();
-  if (!q.find(o => o.id === op.id)) { q.push(op); saveQueue(q); console.log('[Queue] Added:', op.type, op.id); }
+  if (!q.find(o => o.id === op.id)) { q.push(op); saveQueue(q); }
 }
 
 function online(): boolean {
@@ -123,100 +128,90 @@ class DB {
   private ss: Set<(s: SyncStatus) => void> = new Set();
   private data: Transaction[] = [];
   private ready = false;
-  private syncing = false;
-  private interval: ReturnType<typeof setInterval> | null = null;
-  private lastCloudCount = 0;
+  private syncTimeout: ReturnType<typeof setTimeout> | null = null;
+  private intervalId: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => { console.log('[Event] Online'); this.scheduleSync(); });
-      window.addEventListener('offline', () => { console.log('[Event] Offline'); this.notifyS({ syncing: false, lastSync: null, connected: false, error: 'Offline' }); });
+      window.addEventListener('online', () => this.triggerSync());
+      window.addEventListener('offline', () => this.notifyS({ syncing: false, lastSync: null, connected: false, error: 'Offline' }));
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') { console.log('[Event] Visible'); this.scheduleSync(); }
+        if (document.visibilityState === 'visible') this.triggerSync();
       });
+      window.addEventListener('focus', () => this.triggerSync());
     }
   }
 
-  private scheduleSync(): void {
-    setTimeout(() => this.sync(), 100);
+  private triggerSync(): void {
+    if (this.syncTimeout) clearTimeout(this.syncTimeout);
+    this.syncTimeout = setTimeout(() => this.sync(), 500);
   }
 
   private async sync(): Promise<void> {
-    if (this.syncing) { console.log('[Sync] Already running'); return; }
-    if (!online()) { console.log('[Sync] Offline'); return; }
+    if (!online()) return;
     
-    this.syncing = true;
     this.notifyS({ syncing: true, lastSync: null, connected: true, error: null });
 
     try {
-      const cloud = await pullCloud();
+      const { data: cloud, count: cloudCount } = await pullCloud();
       const q = loadQueue();
-      let changed = false;
+
+      let hasChanges = false;
 
       if (cloud && cloud.length > 0) {
-        console.log('[Sync] Cloud has', cloud.length, 'transactions');
         const cloudData = normalize(cloud);
         
         for (const t of cloudData) {
-          if (!this.data.find(x => x._id === t._id)) { this.data.push(t); changed = true; console.log('[Sync] Added from cloud:', t._id); }
+          if (!this.data.find(x => x._id === t._id)) { this.data.push(t); hasChanges = true; }
         }
         
         for (const t of [...this.data]) {
-          if (!cloudData.find(x => x._id === t._id)) { this.data = this.data.filter(x => x._id !== t._id); changed = true; console.log('[Sync] Removed (not in cloud):', t._id); }
+          if (!cloudData.find(x => x._id === t._id)) { this.data = this.data.filter(x => x._id !== t._id); hasChanges = true; }
         }
         
         for (let i = 0; i < this.data.length; i++) {
           const c = cloudData.find(x => x._id === this.data[i]._id);
-          if (c && JSON.stringify(c) !== JSON.stringify(this.data[i])) { this.data[i] = c; changed = true; console.log('[Sync] Updated from cloud:', c._id); }
+          if (c && c.date !== this.data[i].date || c && c.amount !== this.data[i].amount) { 
+            this.data[i] = c; hasChanges = true; 
+          }
         }
-        
-        this.lastCloudCount = cloudData.length;
       }
 
       for (const op of q) {
-        console.log('[Sync] Processing queue op:', op.type, op.id);
         if (op.type === 'add' && op.data) {
-          if (!this.data.find(t => t._id === op.data._id)) { this.data.push(op.data); changed = true; console.log('[Sync] Added from queue:', op.id); }
+          if (!this.data.find(t => t._id === op.data._id)) { this.data.push(op.data); hasChanges = true; }
         } else if (op.type === 'update' && op.data) {
           const i = this.data.findIndex(t => t._id === op.data._id);
-          if (i >= 0) { this.data[i] = op.data; changed = true; console.log('[Sync] Updated from queue:', op.id); }
+          if (i >= 0) { this.data[i] = op.data; hasChanges = true; }
         } else if (op.type === 'delete') {
-          if (this.data.find(t => t._id === op.id)) { this.data = this.data.filter(t => t._id !== op.id); changed = true; console.log('[Sync] Deleted from queue:', op.id); }
+          if (this.data.find(t => t._id === op.id)) { this.data = this.data.filter(t => t._id !== op.id); hasChanges = true; }
         }
       }
 
-      if (changed || q.length > 0) {
+      if (hasChanges || q.length > 0) {
         this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
         const pushed = await pushCloud(this.data);
-        console.log('[Sync] Push result:', pushed);
         if (pushed) {
           saveLocal(this.data);
           saveQueue([]);
           this.notify();
         }
-      } else {
-        console.log('[Sync] No changes');
       }
     } catch (e) { console.error('[Sync] Error:', e); }
 
     const qLen = loadQueue().length;
     this.notifyS({ syncing: false, lastSync: new Date(), connected: true, error: qLen > 0 ? `${qLen} pending` : null });
-    this.syncing = false;
   }
 
   async init(): Promise<void> {
     if (this.ready) return;
-    console.log('[Init] Starting');
     
     this.data = loadLocal();
-    console.log('[Init] Local:', this.data.length, 'transactions');
-    
     const cloud = await pullCloud();
-    if (cloud && cloud.length > 0) {
-      console.log('[Init] Using cloud data:', cloud.length);
-      this.data = normalize(cloud);
+    
+    if (cloud.data && cloud.data.length > 0) {
+      this.data = normalize(cloud.data);
     } else if (this.data.length === 0) {
-      console.log('[Init] Using initial data');
       this.data = normalize(getInitialData());
     }
 
@@ -229,14 +224,12 @@ class DB {
     
     this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     saveLocal(this.data);
-    this.lastCloudCount = this.data.length;
     
-    console.log('[Init] Ready with', this.data.length, 'transactions');
     this.ready = true;
     this.notify();
     
-    if (this.interval) clearInterval(this.interval);
-    this.interval = setInterval(() => this.sync(), 5000);
+    if (this.intervalId) clearInterval(this.intervalId);
+    this.intervalId = setInterval(() => this.triggerSync(), 3000);
     this.sync();
   }
 
@@ -249,14 +242,15 @@ class DB {
 
   async addTransaction(tx: Transaction): Promise<{ tx: Transaction; success: boolean; synced: boolean }> {
     const t = { ...tx, paymentMethod: tx.paymentMethod || 'Card' };
-    console.log('[Add] Adding:', t._id);
     this.data = [...this.data, t];
     saveLocal(this.data);
     this.notify();
     
     const ok = online() ? await pushCloud(this.data) : false;
     if (!ok) queueOp({ id: t._id, type: 'add', data: t, ts: Date.now() });
-    else console.log('[Add] Pushed to cloud');
+    else saveQueue([]);
+    
+    this.triggerSync();
     
     const qLen = loadQueue().length;
     this.notifyS({ syncing: false, lastSync: new Date(), connected: online(), error: ok ? null : `${qLen} pending` });
@@ -272,6 +266,7 @@ class DB {
       this.notify();
       if (online()) await pushCloud(this.data);
       else queueOp({ id: t._id, type: 'update', data: t, ts: Date.now() });
+      this.triggerSync();
     }
     return t;
   }
@@ -282,6 +277,7 @@ class DB {
     this.notify();
     if (online()) await pushCloud(this.data);
     else queueOp({ id, type: 'delete', ts: Date.now() });
+    this.triggerSync();
   }
 
   exportData(): string { return JSON.stringify(this.data, null, 2); }
