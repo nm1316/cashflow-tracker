@@ -7,6 +7,7 @@
   "background_color": "#f8fafc",
   "theme_color": "#10b981",
   "orientation": "portrait-primary",
+  "version": "4",
   "icons": [
     {
       "src": "/favicon.svg",

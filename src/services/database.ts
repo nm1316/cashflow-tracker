@@ -3,10 +3,8 @@ import { march2026Data, january2026Data, february2026Data, april2026Data, may202
 
 const JSONBIN_BIN_ID = '69d223dd856a682189ff28c7';
 const JSONBIN_API_KEY = '$2a$10$QwwAuP12n..jYPPFfwVAZuEzgLY3mtZLdcE.Pac5OV/U12k8AQFqG';
-const LOCAL_KEY = 'cashflow_main';
-const SYNC_KEY = 'cashflow_last_sync';
+const LOCAL_KEY = 'cashflow_data';
 const QUEUE_KEY = 'cashflow_queue';
-const LAST_CLOUD_HASH_KEY = 'cashflow_cloud_hash';
 
 interface QueuedOp {
   id: string;
@@ -54,27 +52,17 @@ function getInitialData(): Transaction[] {
 
 function saveLocal(data: Transaction[]): void {
   localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
-  localStorage.setItem(SYNC_KEY, Date.now().toString());
 }
 
 function loadLocal(): Transaction[] {
   try {
     const s = localStorage.getItem(LOCAL_KEY);
-    if (s) { const p = JSON.parse(s); if (Array.isArray(p) && p.length > 0) return p; }
+    if (s) {
+      const p = JSON.parse(s);
+      if (Array.isArray(p) && p.length > 0) return p;
+    }
   } catch {}
   return [];
-}
-
-function getCloudHash(data: Transaction[]): string {
-  return data.map(t => t._id).sort().join(',');
-}
-
-function saveCloudHash(hash: string): void {
-  localStorage.setItem(LAST_CLOUD_HASH_KEY, hash);
-}
-
-function getCloudHashStored(): string {
-  return localStorage.getItem(LAST_CLOUD_HASH_KEY) || '';
 }
 
 async function pushCloud(data: Transaction[]): Promise<boolean> {
@@ -84,9 +72,12 @@ async function pushCloud(data: Transaction[]): Promise<boolean> {
       headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
       body: JSON.stringify(data),
     });
-    if (res.ok) { saveCloudHash(getCloudHash(data)); return true; }
-  } catch {}
-  return false;
+    console.log('[Cloud] Push result:', res.ok, res.status);
+    return res.ok;
+  } catch (e) {
+    console.log('[Cloud] Push error:', e);
+    return false;
+  }
 }
 
 async function pullCloud(): Promise<Transaction[] | null> {
@@ -97,9 +88,12 @@ async function pullCloud(): Promise<Transaction[] | null> {
     });
     if (res.ok) {
       const r = await res.json();
+      console.log('[Cloud] Pull result:', r.record?.length || 0, 'transactions');
       if (r.record && Array.isArray(r.record) && r.record.length > 0) return r.record;
     }
-  } catch {}
+  } catch (e) {
+    console.log('[Cloud] Pull error:', e);
+  }
   return null;
 }
 
@@ -117,7 +111,7 @@ function saveQueue(q: QueuedOp[]): void {
 
 function queueOp(op: QueuedOp): void {
   const q = loadQueue();
-  if (!q.find(o => o.id === op.id)) { q.push(op); saveQueue(q); }
+  if (!q.find(o => o.id === op.id)) { q.push(op); saveQueue(q); console.log('[Queue] Added:', op.type, op.id); }
 }
 
 function online(): boolean {
@@ -131,23 +125,26 @@ class DB {
   private ready = false;
   private syncing = false;
   private interval: ReturnType<typeof setInterval> | null = null;
+  private lastCloudCount = 0;
 
   constructor() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => this.onNet(true));
-      window.addEventListener('offline', () => this.onNet(false));
+      window.addEventListener('online', () => { console.log('[Event] Online'); this.scheduleSync(); });
+      window.addEventListener('offline', () => { console.log('[Event] Offline'); this.notifyS({ syncing: false, lastSync: null, connected: false, error: 'Offline' }); });
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') this.sync();
+        if (document.visibilityState === 'visible') { console.log('[Event] Visible'); this.scheduleSync(); }
       });
     }
   }
 
-  private onNet(is: boolean): void {
-    if (is) this.sync();
+  private scheduleSync(): void {
+    setTimeout(() => this.sync(), 100);
   }
 
   private async sync(): Promise<void> {
-    if (this.syncing || !online()) return;
+    if (this.syncing) { console.log('[Sync] Already running'); return; }
+    if (!online()) { console.log('[Sync] Offline'); return; }
+    
     this.syncing = true;
     this.notifyS({ syncing: true, lastSync: null, connected: true, error: null });
 
@@ -157,47 +154,48 @@ class DB {
       let changed = false;
 
       if (cloud && cloud.length > 0) {
-        const cData = normalize(cloud);
-        const cIds = cData.map(t => t._id).sort().join(',');
-        const lIds = this.data.map(t => t._id).sort().join(',');
-
-        if (cIds !== lIds) {
-          for (const t of cData) {
-            if (!this.data.find(x => x._id === t._id)) { this.data.push(t); changed = true; }
-          }
-          for (const t of this.data) {
-            if (!cData.find(x => x._id === t._id)) { this.data = this.data.filter(x => x._id !== t._id); changed = true; }
-          }
-          for (const t of this.data) {
-            const c = cData.find(x => x._id === t._id);
-            if (c) {
-              const ci = cData.indexOf(c);
-              const ti = this.data.indexOf(t);
-              if (ci !== ti) { this.data[ti] = c; changed = true; }
-            }
-          }
+        console.log('[Sync] Cloud has', cloud.length, 'transactions');
+        const cloudData = normalize(cloud);
+        
+        for (const t of cloudData) {
+          if (!this.data.find(x => x._id === t._id)) { this.data.push(t); changed = true; console.log('[Sync] Added from cloud:', t._id); }
         }
+        
+        for (const t of [...this.data]) {
+          if (!cloudData.find(x => x._id === t._id)) { this.data = this.data.filter(x => x._id !== t._id); changed = true; console.log('[Sync] Removed (not in cloud):', t._id); }
+        }
+        
+        for (let i = 0; i < this.data.length; i++) {
+          const c = cloudData.find(x => x._id === this.data[i]._id);
+          if (c && JSON.stringify(c) !== JSON.stringify(this.data[i])) { this.data[i] = c; changed = true; console.log('[Sync] Updated from cloud:', c._id); }
+        }
+        
+        this.lastCloudCount = cloudData.length;
       }
 
       for (const op of q) {
+        console.log('[Sync] Processing queue op:', op.type, op.id);
         if (op.type === 'add' && op.data) {
-          if (!this.data.find(t => t._id === op.data!._id)) { this.data.push(op.data); changed = true; }
+          if (!this.data.find(t => t._id === op.data._id)) { this.data.push(op.data); changed = true; console.log('[Sync] Added from queue:', op.id); }
         } else if (op.type === 'update' && op.data) {
-          const i = this.data.findIndex(t => t._id === op.data!._id);
-          if (i >= 0) { this.data[i] = op.data; changed = true; }
+          const i = this.data.findIndex(t => t._id === op.data._id);
+          if (i >= 0) { this.data[i] = op.data; changed = true; console.log('[Sync] Updated from queue:', op.id); }
         } else if (op.type === 'delete') {
-          if (this.data.find(t => t._id === op.id)) { this.data = this.data.filter(t => t._id !== op.id); changed = true; }
+          if (this.data.find(t => t._id === op.id)) { this.data = this.data.filter(t => t._id !== op.id); changed = true; console.log('[Sync] Deleted from queue:', op.id); }
         }
       }
 
       if (changed || q.length > 0) {
         this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
         const pushed = await pushCloud(this.data);
+        console.log('[Sync] Push result:', pushed);
         if (pushed) {
           saveLocal(this.data);
           saveQueue([]);
           this.notify();
         }
+      } else {
+        console.log('[Sync] No changes');
       }
     } catch (e) { console.error('[Sync] Error:', e); }
 
@@ -208,13 +206,18 @@ class DB {
 
   async init(): Promise<void> {
     if (this.ready) return;
+    console.log('[Init] Starting');
     
     this.data = loadLocal();
-    if (this.data.length === 0) this.data = normalize(getInitialData());
+    console.log('[Init] Local:', this.data.length, 'transactions');
     
     const cloud = await pullCloud();
     if (cloud && cloud.length > 0) {
+      console.log('[Init] Using cloud data:', cloud.length);
       this.data = normalize(cloud);
+    } else if (this.data.length === 0) {
+      console.log('[Init] Using initial data');
+      this.data = normalize(getInitialData());
     }
 
     const q = loadQueue();
@@ -226,20 +229,15 @@ class DB {
     
     this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     saveLocal(this.data);
+    this.lastCloudCount = this.data.length;
     
+    console.log('[Init] Ready with', this.data.length, 'transactions');
     this.ready = true;
     this.notify();
-    this.startSync();
-    this.sync();
-  }
-
-  private startSync(): void {
-    if (this.interval) return;
+    
+    if (this.interval) clearInterval(this.interval);
     this.interval = setInterval(() => this.sync(), 5000);
-  }
-
-  private stopSync(): void {
-    if (this.interval) { clearInterval(this.interval); this.interval = null; }
+    this.sync();
   }
 
   private notify(): void { this.ls.forEach(cb => cb([...this.data])); }
@@ -251,15 +249,17 @@ class DB {
 
   async addTransaction(tx: Transaction): Promise<{ tx: Transaction; success: boolean; synced: boolean }> {
     const t = { ...tx, paymentMethod: tx.paymentMethod || 'Card' };
+    console.log('[Add] Adding:', t._id);
     this.data = [...this.data, t];
     saveLocal(this.data);
     this.notify();
     
     const ok = online() ? await pushCloud(this.data) : false;
-    if (ok) saveQueue([]);
-    else queueOp({ id: t._id, type: 'add', data: t, ts: Date.now() });
+    if (!ok) queueOp({ id: t._id, type: 'add', data: t, ts: Date.now() });
+    else console.log('[Add] Pushed to cloud');
     
-    this.notifyS({ syncing: false, lastSync: new Date(), connected: online(), error: ok ? null : 'Pending sync' });
+    const qLen = loadQueue().length;
+    this.notifyS({ syncing: false, lastSync: new Date(), connected: online(), error: ok ? null : `${qLen} pending` });
     return { tx: t, success: true, synced: ok };
   }
 
@@ -270,8 +270,8 @@ class DB {
       this.data = this.data.map((x, j) => j === i ? t : x);
       saveLocal(this.data);
       this.notify();
-      const ok = online() ? await pushCloud(this.data) : false;
-      if (!ok) queueOp({ id: t._id, type: 'update', data: t, ts: Date.now() });
+      if (online()) await pushCloud(this.data);
+      else queueOp({ id: t._id, type: 'update', data: t, ts: Date.now() });
     }
     return t;
   }
@@ -280,8 +280,8 @@ class DB {
     this.data = this.data.filter(x => x._id !== id);
     saveLocal(this.data);
     this.notify();
-    const ok = online() ? await pushCloud(this.data) : false;
-    if (!ok) queueOp({ id, type: 'delete', ts: Date.now() });
+    if (online()) await pushCloud(this.data);
+    else queueOp({ id, type: 'delete', ts: Date.now() });
   }
 
   exportData(): string { return JSON.stringify(this.data, null, 2); }
