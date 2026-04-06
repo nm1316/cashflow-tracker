@@ -316,7 +316,6 @@ export default function App({ onLogout }: { onLogout: () => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<NewTransaction>({ date: '', description: '', amount: 0, type: 'Expense', paymentMethod: 'Card' });
   const [addForm, setAddForm] = useState<NewTransaction>({ date: '', description: '', amount: 0, type: 'Expense', paymentMethod: 'Card' });
-  const [dbReady, setDbReady] = useState(false);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
       return window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -337,9 +336,7 @@ export default function App({ onLogout }: { onLogout: () => void }) {
   }, [darkMode]);
 
   useEffect(() => {
-    db.init().then(() => {
-      setDbReady(true);
-    });
+    db.init();
     const unsub = db.subscribe(setAllTransactions);
     const unsubSync = db.onSyncStatusChange((status) => {
       setSyncStatus(status.syncing ? 'syncing' : status.connected ? 'cloud' : 'offline');
@@ -398,25 +395,11 @@ export default function App({ onLogout }: { onLogout: () => void }) {
     const d = new Date(dateToUse + 'T00:00:00');
     const id = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const newTx: Transaction = { _id: id, date: dateToUse, description: addForm.description, amount, type: addForm.type, paymentMethod: addForm.paymentMethod, month: MONTH_ORDER[d.getMonth()], year: d.getFullYear() };
-    const result = await db.addTransaction(newTx);
-    setAllTransactions(db.getAllTransactions());
+    await db.addTransaction(newTx);
     setAddForm({ date: '', description: '', amount: 0, type: 'Expense', paymentMethod: 'Card' });
     setShowAdd(false);
-    setToast({ message: result.synced ? 'Transaction saved!' : 'Saved locally (cloud sync unavailable)', type: 'success' });
+    setToast({ message: 'Transaction saved!', type: 'success' });
   };
-
-  if (!dbReady) {
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 rounded-xl bg-slate-900 dark:bg-white flex items-center justify-center mx-auto mb-3">
-            <span className="text-white dark:text-slate-900 font-bold text-lg">$</span>
-          </div>
-          <p className="text-sm text-slate-500">Loading...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col">
