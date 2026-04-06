@@ -340,7 +340,7 @@ export default function App({ onLogout }: { onLogout: () => void }) {
     db.init().then(async () => {
       setAllTransactions(db.getAllTransactions());
       setDbReady(true);
-      await db.refresh();
+      setTimeout(() => db.refresh(), 2000);
       setAllTransactions(db.getAllTransactions());
     });
     const unsub = db.subscribe(setAllTransactions);
@@ -359,6 +359,10 @@ export default function App({ onLogout }: { onLogout: () => void }) {
     
     return () => { unsub(); unsubSync(); };
   }, []);
+  
+  const handleManualSync = () => {
+    db.refresh();
+  };
 
   const filledTransactions = useMemo(() => 
     allTransactions.filter(t => t.description && t.description.trim().length > 0),
@@ -487,6 +491,10 @@ export default function App({ onLogout }: { onLogout: () => void }) {
               )}
               {syncStatus === 'cloud' ? 'Synced' : syncStatus === 'offline' ? 'Offline' : pendingCount > 0 ? `${pendingCount} Pending` : 'Local'}
             </div>
+            <button onClick={handleManualSync} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-500 px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              Sync
+            </button>
             <button onClick={() => { const data = db.exportData(); const blob = new Blob([data], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `cashflow-backup-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-500 px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               Export

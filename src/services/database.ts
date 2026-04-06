@@ -200,8 +200,12 @@ class DatabaseService {
 
   private startPeriodicSync(): void {
     if (this.syncInterval) return;
+    console.log('[PeriodicSync] Starting 10s sync interval');
     this.syncInterval = setInterval(() => {
-      if (isOnline()) this.pullFromCloud();
+      if (isOnline()) {
+        console.log('[PeriodicSync] Running sync check');
+        this.pullFromCloud();
+      }
     }, 10000);
   }
 
@@ -280,25 +284,33 @@ class DatabaseService {
 
   async init(): Promise<void> {
     if (this.ready) return;
+    console.log('[Init] Starting database service');
     
     this.online = isOnline();
+    console.log(`[Init] Online: ${this.online}`);
+    
     const cloud = await pullCloud();
     const local = loadLocal();
     const queue = loadOfflineQueue();
     const initial = getInitialData();
     
+    console.log(`[Init] Cloud: ${cloud?.length || 0}, Local: ${local.length}, Queue: ${queue.length}`);
+    
     if (cloud && cloud.length > 0) {
       this.data = normalizeData(cloud);
       this.synced = true;
       saveLocal(this.data);
+      console.log('[Init] Loaded from cloud');
     } else if (local.length > 0) {
       this.data = normalizeData(local);
       saveLocal(this.data);
       this.synced = await pushCloud(this.data);
+      console.log('[Init] Loaded from local, pushed to cloud');
     } else {
       this.data = normalizeData(initial);
       saveLocal(this.data);
       this.synced = await pushCloud(this.data);
+      console.log('[Init] Loaded initial data');
     }
     
     for (const op of queue) {
@@ -315,6 +327,7 @@ class DatabaseService {
     this.data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
     this.ready = true;
+    console.log(`[Init] Ready with ${this.data.length} transactions`);
     this.notify();
     this.notifySync();
     this.startPeriodicSync();
@@ -438,7 +451,11 @@ class DatabaseService {
   }
 
   async refresh(): Promise<void> {
-    if (!isOnline()) return;
+    console.log('[Refresh] Manual refresh triggered');
+    if (!isOnline()) {
+      console.log('[Refresh] Offline, skipping');
+      return;
+    }
     const cloud = await pullCloud();
     if (cloud && cloud.length > 0) {
       this.data = normalizeData(cloud);
