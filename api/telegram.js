@@ -178,10 +178,8 @@ async function pushData(data) {
   } catch (e) { console.error(e); return false; }
 }
 
-function getMonthData(data, month = 'April') {
-  const now = new Date();
-  const currentMonth = now.toLocaleString('en-US', { month: 'long' });
-  return data.filter(t => t.month === currentMonth && t.description && t.amount !== 0);
+function getMonthData(data) {
+  return data.filter(t => t.month === 'April' && t.description && t.amount !== 0);
 }
 
 function getTodayData(data) {
