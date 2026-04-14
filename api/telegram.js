@@ -2,8 +2,10 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8635500877:AAG58sb
 const JSONBIN_BIN_ID = '69d223dd856a682189ff28c7';
 const JSONBIN_API_KEY = process.env.JSONBIN_API_KEY || '$2a$10$QwwAuP12n..jYPPFfwVAZuEzgLY3mtZLdcE.Pac5OV/U12k8AQFqG';
 const APP_URL = 'https://cashflow-tracker-kappa-lime.vercel.app';
+const DAILY_BUDGET = 100;
 
 let userState = new Map();
+let subscribedUsers = new Set();
 
 async function sendMessage(chatId, text, keyboard = null) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -62,6 +64,8 @@ function parseIntent(text) {
   if (/expense only|only expense|all expense|list expense|expenses|مصروف|depense/i.test(t)) return 'list_expense';
   
   // Help/menu
+  if (/subscribe|report daily|تقرير يومي|daily report|notify|تنبيه/i.test(t)) return 'subscribe';
+  if (/unsubscribe|stop|ايقاف/i.test(t)) return 'unsubscribe';
   if (/help|command|menu|option|what.*can.*do|مساعدة|aide|help me|/test(t) || text === '?' || text === '/help' || text === '/start') return 'help';
   
   // Adding transaction - common patterns
@@ -174,8 +178,65 @@ async function pushData(data) {
   } catch (e) { console.error(e); return false; }
 }
 
-function getMonthData(data) {
-  return data.filter(t => t.month === 'April' && t.description && t.amount !== 0);
+function getMonthData(data, month = 'April') {
+  const now = new Date();
+  const currentMonth = now.toLocaleString('en-US', { month: 'long' });
+  return data.filter(t => t.month === currentMonth && t.description && t.amount !== 0);
+}
+
+function getTodayData(data) {
+  const today = new Date().toISOString().slice(0, 10);
+  return data.filter(t => t.date === today && t.description && t.amount !== 0);
+}
+
+function getYesterdayData(data) {
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  return data.filter(t => t.date === yesterday && t.description && t.amount !== 0);
+}
+
+async function sendDailyReport(chatId) {
+  const d = await fetchData();
+  const monthData = getMonthData(d);
+  const todayData = getTodayData(d);
+  const yesterdayData = getYesterdayData(d);
+  
+  const monthIncome = monthData.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+  const monthExpense = monthData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const todayExpense = todayData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const yesterdayExpense = yesterdayData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  
+  const balance = monthIncome - monthExpense;
+  const remainingDays = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate();
+  const dailyBudget = DAILY_BUDGET;
+  const avgDailySpend = monthExpense / (new Date().getDate());
+  const projectedSpend = avgDailySpend * new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+  const recommendedDaily = balance > 0 ? Math.max(0, balance / Math.max(1, remainingDays)) : 0;
+  
+  const todayTxns = todayData.filter(t => t.amount < 0);
+  const isOverBudget = todayExpense > dailyBudget;
+  
+  let msg = `📊 <b>Daily Report</b> - ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}\n`;
+  msg += `══════════════════════\n\n`;
+  msg += `🛒 <b>Today:</b> AED ${todayExpense.toLocaleString()}${isOverBudget ? ' ⚠️' : ''}\n`;
+  msg += `📅 <b>Yesterday:</b> AED ${yesterdayExpense.toLocaleString()}\n`;
+  msg += `────────────────────\n`;
+  msg += `💵 <b>Month Income:</b> AED ${monthIncome.toLocaleString()}\n`;
+  msg += `💸 <b>Month Expenses:</b> AED ${monthExpense.toLocaleString()}\n`;
+  msg += `────────────────────\n`;
+  msg += `${balance >= 0 ? '💰' : '⚠️'} <b>Balance:</b> AED ${balance.toLocaleString()}\n`;
+  msg += `────────────────────\n`;
+  msg += `🎯 <b>Daily Budget:</b> AED ${dailyBudget}\n`;
+  msg += `📊 <b>Avg Daily:</b> AED ${avgDailySpend.toFixed(0)}\n`;
+  msg += `💡 <b>Recommended:</b> AED ${recommendedDaily.toFixed(0)}/day\n`;
+  
+  if (todayTxns.length > 0) {
+    msg += `\n<b>Today Expenses:</b>\n`;
+    todayTxns.slice(0, 5).forEach(t => {
+      msg += `• ${t.description.substring(0, 20)}: AED ${Math.abs(t.amount).toLocaleString()}\n`;
+    });
+  }
+  
+  await sendMessage(chatId, msg);
 }
 
 async function getBalance(data) {
@@ -187,7 +248,7 @@ async function getBalance(data) {
 
 function menuKeyboard() {
   return [
-    [{ text: '💰 Balance', callback_data: 'cb_balance' }],
+    [{ text: '💰 Balance + Budget', callback_data: 'cb_balance' }],
     [{ text: '➕ Add Transaction', callback_data: 'cb_add' }],
     [{ text: '📋 All Transactions', callback_data: 'cb_list_all' }],
     [{ text: '💵 Income Only', callback_data: 'cb_list_income' }],
@@ -198,6 +259,7 @@ function menuKeyboard() {
     [{ text: '💎 Savings Plan', callback_data: 'cb_savings' }],
     [{ text: '🗑️ Delete Last', callback_data: 'cb_delete_last' }],
     [{ text: '📱 Open App', url: APP_URL }],
+    [{ text: '🔔 Daily Report', callback_data: 'cb_subscribe' }],
     [{ text: '❓ Help', callback_data: 'cb_help' }]
   ];
 }
@@ -251,7 +313,14 @@ Just type naturally! I understand:
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(200).json({ ok: true });
+  if (req.method !== 'POST') {
+    if (subscribedUsers.size > 0) {
+      for (const chatId of subscribedUsers) {
+        await sendDailyReport(chatId);
+      }
+    }
+    return res.status(200).json({ ok: true, sent: subscribedUsers.size });
+  }
   
   try {
     const update = req.body;
@@ -397,6 +466,10 @@ export default async function handler(req, res) {
       else if (data === 'cb_help') {
         await editMessage(chatId, msgId, getHelpText(), [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
       }
+      else if (data === 'cb_subscribe') {
+        subscribedUsers.add(chatId);
+        await editMessage(chatId, msgId, '✅ <b>Daily Reports Enabled!</b>\n\nYou will receive a daily expense summary.\n\nSend "stop" to unsubscribe.', [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+      }
 
       await res.status(200).json({ ok: true });
       return;
@@ -434,7 +507,17 @@ export default async function handler(req, res) {
     switch (intent) {
       case 'start':
       case 'help':
-        await sendMessage(chatId, '🤖 <b>Cashflow AI Agent</b>\n\nYour personal expense manager! Type naturally.\n\nExamples:\n• "my balance"\n• "50 lunch"\n• "salary 4500"\n• "delete last"\n• "monthly report"\n• "help" for all commands', menuKeyboard());
+        await sendMessage(chatId, '🤖 <b>Cashflow AI Agent</b>\n\nYour personal expense manager! Type naturally.\n\nExamples:\n• "my balance"\n• "50 lunch"\n• "salary 4500"\n• "delete last"\n• "monthly report"\n• "daily report" to subscribe\n• "help" for all commands', menuKeyboard());
+        break;
+
+      case 'subscribe':
+        subscribedUsers.add(chatId);
+        await sendMessage(chatId, '✅ <b>Daily Reports Enabled!</b>\n\nYou will receive a daily expense summary every evening.\n\nSend "stop" to unsubscribe.', [[{ text: '📱 Open App', url: APP_URL }]]);
+        break;
+
+      case 'unsubscribe':
+        subscribedUsers.delete(chatId);
+        await sendMessage(chatId, '❌ <b>Daily Reports Unsubscribed</b>\n\nSend "daily report" to subscribe again.', [[{ text: '📱 Open App', url: APP_URL }]]);
         break;
 
       case 'balance': {
