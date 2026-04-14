@@ -67,7 +67,7 @@ function parseIntent(text) {
   if (/subscribe|report daily|تقرير يومي|daily report|notify|تنبيه/i.test(t)) return 'subscribe';
   if (/unsubscribe|stop|ايقاف/i.test(t)) return 'unsubscribe';
   if (/yesterday|امس Hier/i.test(t)) return 'yesterday';
-  if (/dates|calendar|التقويم|dates in month/i.test(t)) return 'show_dates';
+  if (/dates|calendar|التقويم|which dates/i.test(t)) return 'date_picker';
   if (/help|command|menu|option|what.*can.*do|مساعدة|aide|help me|/test(t) || text === '?' || text === '/help' || text === '/start') return 'help';
   
   // Adding transaction - common patterns
@@ -205,16 +205,15 @@ async function sendDailyReport(chatId, dateStr = null) {
   }
   
   const dayData = d.filter(t => t.date === targetDate && t.description && t.amount !== 0);
-  const dayExpense = dayData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const total = dayData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
   
-  const displayDate = new Date(targetDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const displayDate = new Date(targetDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   
   let msg = `📊 ${displayDate}\n`;
   msg += `━━━━━━━━━━━━\n`;
-  msg += `🛒 Total: AED ${dayExpense.toLocaleString()}\n\n`;
+  msg += `🛒 Total: AED ${total.toLocaleString()}\n\n`;
   
   if (dayData.length > 0) {
-    dayData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     dayData.forEach(t => {
       msg += `• ${t.description}: AED ${Math.abs(t.amount).toLocaleString()}\n`;
     });
@@ -223,6 +222,30 @@ async function sendDailyReport(chatId, dateStr = null) {
   }
   
   await sendMessage(chatId, msg);
+}
+
+async function sendDatePicker(chatId) {
+  const d = await fetchData();
+  const monthData = getMonthData(d);
+  const dates = [...new Set(monthData.map(t => t.date))].sort().reverse();
+  
+  let msg = `📅 <b>Select Date</b>\n\n`;
+  msg += `Available dates this month:\n`;
+  
+  const keyboard = [];
+  for (let i = 0; i < dates.length; i += 3) {
+    const row = [];
+    for (let j = i; j < Math.min(i + 3, dates.length); j++) {
+      const date = new Date(dates[j] + 'T00:00:00');
+      const day = date.getDate();
+      const label = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      row.push({ text: label, callback_data: `date_${dates[j]}` });
+    }
+    keyboard.push(row);
+  }
+  keyboard.push([{ text: '📱 Open App', url: APP_URL }]);
+  
+  await sendMessage(chatId, msg, keyboard);
 }
 
 async function getBalance(data) {
@@ -456,17 +479,11 @@ export default async function handler(req, res) {
         await editMessage(chatId, msgId, '✅ Sent!', [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
       }
       else if (data === 'cb_dates') {
-        const d = await fetchData();
-        const monthData = getMonthData(d);
-        const dates = [...new Set(monthData.map(t => t.date))].sort();
-        
-        let msg = `📅 <b>Available Dates</b>\n\n`;
-        dates.forEach(date => {
-          const display = new Date(date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-          msg += `📌 ${display}\n`;
-        });
-        
-        await editMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+        await sendDatePicker(chatId);
+      }
+      else if (data && data.startsWith('date_')) {
+        const dateStr = data.replace('date_', '');
+        await sendDailyReport(chatId, dateStr);
       }
 
       await res.status(200).json({ ok: true });
@@ -524,18 +541,8 @@ export default async function handler(req, res) {
         break;
       }
 
-      case 'show_dates': {
-        const d = await fetchData();
-        const monthData = getMonthData(d);
-        const dates = [...new Set(monthData.map(t => t.date))].sort();
-        
-        let msg = `📅 <b>Available Dates</b>\n\n`;
-        dates.forEach(date => {
-          const display = new Date(date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-          msg += `📌 ${display}\n`;
-        });
-        
-        await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }]]);
+      case 'date_picker': {
+        await sendDatePicker(chatId);
         break;
       }
 
