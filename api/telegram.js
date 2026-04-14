@@ -67,6 +67,7 @@ function parseIntent(text) {
   if (/subscribe|report daily|تقرير يومي|daily report|notify|تنبيه/i.test(t)) return 'subscribe';
   if (/unsubscribe|stop|ايقاف/i.test(t)) return 'unsubscribe';
   if (/yesterday|امس Hier/i.test(t)) return 'yesterday';
+  if (/dates|calendar|التقويم|dates in month/i.test(t)) return 'show_dates';
   if (/help|command|menu|option|what.*can.*do|مساعدة|aide|help me|/test(t) || text === '?' || text === '/help' || text === '/start') return 'help';
   
   // Adding transaction - common patterns
@@ -195,7 +196,6 @@ function getYesterdayData(data) {
 
 async function sendDailyReport(chatId, dateStr = null) {
   const d = await fetchData();
-  const monthData = getMonthData(d);
   
   let targetDate;
   if (dateStr) {
@@ -206,17 +206,21 @@ async function sendDailyReport(chatId, dateStr = null) {
   
   const dayData = d.filter(t => t.date === targetDate && t.description && t.amount !== 0);
   const dayExpense = dayData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-  const dayIncome = dayData.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-  
-  const monthIncome = monthData.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-  const monthExpense = monthData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-  const balance = monthIncome - monthExpense;
   
   const displayDate = new Date(targetDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
   
-  let msg = `📊 ${displayDate}\n\n`;
-  msg += `💰 Balance: AED ${balance.toLocaleString()}\n`;
-  msg += `🛒 Today: AED ${dayExpense.toLocaleString()}`;
+  let msg = `📊 ${displayDate}\n`;
+  msg += `━━━━━━━━━━━━\n`;
+  msg += `🛒 Total: AED ${dayExpense.toLocaleString()}\n\n`;
+  
+  if (dayData.length > 0) {
+    dayData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    dayData.forEach(t => {
+      msg += `• ${t.description}: AED ${Math.abs(t.amount).toLocaleString()}\n`;
+    });
+  } else {
+    msg += `<i>No expenses</i>`;
+  }
   
   await sendMessage(chatId, msg);
 }
@@ -230,18 +234,12 @@ async function getBalance(data) {
 
 function menuKeyboard() {
   return [
-    [{ text: '💰 Balance + Budget', callback_data: 'cb_balance' }],
+    [{ text: '💰 Balance', callback_data: 'cb_balance' }],
+    [{ text: '📊 Daily Report', callback_data: 'cb_daily' }],
+    [{ text: '📅 Show Dates', callback_data: 'cb_dates' }],
     [{ text: '➕ Add Transaction', callback_data: 'cb_add' }],
-    [{ text: '📋 All Transactions', callback_data: 'cb_list_all' }],
-    [{ text: '💵 Income Only', callback_data: 'cb_list_income' }],
-    [{ text: '🛒 Expenses Only', callback_data: 'cb_list_expense' }],
-    [{ text: '📊 Monthly Report', callback_data: 'cb_report' }],
     [{ text: '🔝 Top Expenses', callback_data: 'cb_top' }],
-    [{ text: '📁 Categories', callback_data: 'cb_category' }],
-    [{ text: '💎 Savings Plan', callback_data: 'cb_savings' }],
-    [{ text: '🗑️ Delete Last', callback_data: 'cb_delete_last' }],
     [{ text: '📱 Open App', url: APP_URL }],
-    [{ text: '🔔 Daily Report', callback_data: 'cb_subscribe' }],
     [{ text: '❓ Help', callback_data: 'cb_help' }]
   ];
 }
@@ -452,6 +450,24 @@ export default async function handler(req, res) {
         subscribedUsers.add(chatId);
         await editMessage(chatId, msgId, '✅ <b>Daily Reports Enabled!</b>\n\nYou will receive a daily expense summary.\n\nSend "stop" to unsubscribe.', [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
       }
+      else if (data === 'cb_daily') {
+        const today = new Date().toISOString().slice(0, 10);
+        await sendDailyReport(chatId, today);
+        await editMessage(chatId, msgId, '✅ Sent!', [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+      }
+      else if (data === 'cb_dates') {
+        const d = await fetchData();
+        const monthData = getMonthData(d);
+        const dates = [...new Set(monthData.map(t => t.date))].sort();
+        
+        let msg = `📅 <b>Available Dates</b>\n\n`;
+        dates.forEach(date => {
+          const display = new Date(date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+          msg += `📌 ${display}\n`;
+        });
+        
+        await editMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+      }
 
       await res.status(200).json({ ok: true });
       return;
@@ -505,6 +521,21 @@ export default async function handler(req, res) {
       case 'yesterday': {
         const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
         await sendDailyReport(chatId, yesterday);
+        break;
+      }
+
+      case 'show_dates': {
+        const d = await fetchData();
+        const monthData = getMonthData(d);
+        const dates = [...new Set(monthData.map(t => t.date))].sort();
+        
+        let msg = `📅 <b>Available Dates</b>\n\n`;
+        dates.forEach(date => {
+          const display = new Date(date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+          msg += `📌 ${display}\n`;
+        });
+        
+        await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }]]);
         break;
       }
 
