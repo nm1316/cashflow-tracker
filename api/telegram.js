@@ -196,42 +196,28 @@ async function sendDailyReport(chatId) {
   const d = await fetchData();
   const monthData = getMonthData(d);
   const todayData = getTodayData(d);
-  const yesterdayData = getYesterdayData(d);
   
   const monthIncome = monthData.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const monthExpense = monthData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
   const todayExpense = todayData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-  const yesterdayExpense = yesterdayData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
   
   const balance = monthIncome - monthExpense;
-  const remainingDays = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate();
-  const dailyBudget = DAILY_BUDGET;
-  const avgDailySpend = monthExpense / (new Date().getDate());
-  const projectedSpend = avgDailySpend * new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
-  const recommendedDaily = balance > 0 ? Math.max(0, balance / Math.max(1, remainingDays)) : 0;
+  
+  let msg = `📊 <b>Daily Report</b> - ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}\n\n`;
+  msg += `💰 <b>Total Balance:</b> AED ${balance.toLocaleString()}\n`;
+  msg += `💵 Income: AED ${monthIncome.toLocaleString()}\n`;
+  msg += `🛒 Expenses: AED ${monthExpense.toLocaleString()}\n\n`;
+  
+  msg += `📅 <b>Today:</b> AED ${todayExpense.toLocaleString()}\n`;
   
   const todayTxns = todayData.filter(t => t.amount < 0);
-  const isOverBudget = todayExpense > dailyBudget;
-  
-  let msg = `📊 <b>Daily Report</b> - ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}\n`;
-  msg += `══════════════════════\n\n`;
-  msg += `🛒 <b>Today:</b> AED ${todayExpense.toLocaleString()}${isOverBudget ? ' ⚠️' : ''}\n`;
-  msg += `📅 <b>Yesterday:</b> AED ${yesterdayExpense.toLocaleString()}\n`;
-  msg += `────────────────────\n`;
-  msg += `💵 <b>Month Income:</b> AED ${monthIncome.toLocaleString()}\n`;
-  msg += `💸 <b>Month Expenses:</b> AED ${monthExpense.toLocaleString()}\n`;
-  msg += `────────────────────\n`;
-  msg += `${balance >= 0 ? '💰' : '⚠️'} <b>Balance:</b> AED ${balance.toLocaleString()}\n`;
-  msg += `────────────────────\n`;
-  msg += `🎯 <b>Daily Budget:</b> AED ${dailyBudget}\n`;
-  msg += `📊 <b>Avg Daily:</b> AED ${avgDailySpend.toFixed(0)}\n`;
-  msg += `💡 <b>Recommended:</b> AED ${recommendedDaily.toFixed(0)}/day\n`;
-  
   if (todayTxns.length > 0) {
-    msg += `\n<b>Today Expenses:</b>\n`;
-    todayTxns.slice(0, 5).forEach(t => {
-      msg += `• ${t.description.substring(0, 20)}: AED ${Math.abs(t.amount).toLocaleString()}\n`;
+    msg += `\n<b>Today's Expenses:</b>\n`;
+    todayTxns.forEach(t => {
+      msg += `• ${t.description.substring(0, 25)}: AED ${Math.abs(t.amount).toLocaleString()}\n`;
     });
+  } else {
+    msg += `\n<i>No expenses today</i>`;
   }
   
   await sendMessage(chatId, msg);
