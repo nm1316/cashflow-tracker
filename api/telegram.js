@@ -66,8 +66,7 @@ function parseIntent(text) {
   // Help/menu
   if (/subscribe|report daily|تقرير يومي|daily report|notify|تنبيه/i.test(t)) return 'subscribe';
   if (/unsubscribe|stop|ايقاف/i.test(t)) return 'unsubscribe';
-  if (/yesterday|امس Hier|gister/i.test(t)) return 'yesterday';
-  if (/(\d{1,2})\/(\d{1,2})|(\d{1,2})-(\d{1,2})|(\d{4})-(\d{2})-(\d{2})/i.test(t)) return 'date_report';
+  if (/yesterday|امس Hier/i.test(t)) return 'yesterday';
   if (/help|command|menu|option|what.*can.*do|مساعدة|aide|help me|/test(t) || text === '?' || text === '/help' || text === '/start') return 'help';
   
   // Adding transaction - common patterns
@@ -213,25 +212,11 @@ async function sendDailyReport(chatId, dateStr = null) {
   const monthExpense = monthData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
   const balance = monthIncome - monthExpense;
   
-  const displayDate = new Date(targetDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  const displayDate = new Date(targetDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
   
-  let msg = `📊 <b>${displayDate}</b>\n\n`;
-  msg += `💰 <b>Month Balance:</b> AED ${balance.toLocaleString()}\n\n`;
-  msg += `📅 <b>${displayDate}:</b>\n`;
-  msg += `💵 Income: AED ${dayIncome.toLocaleString()}\n`;
-  msg += `🛒 Expenses: AED ${dayExpense.toLocaleString()}\n`;
-  msg += `💰 Net: AED ${(dayIncome - dayExpense).toLocaleString()}\n\n`;
-  
-  if (dayData.length > 0) {
-    msg += `<b>Transactions:</b>\n`;
-    dayData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    dayData.forEach(t => {
-      const emoji = t.amount > 0 ? '💵' : '🛒';
-      msg += `${emoji} ${t.description.substring(0, 25)}: AED ${Math.abs(t.amount).toLocaleString()}\n`;
-    });
-  } else {
-    msg += `<i>No transactions</i>`;
-  }
+  let msg = `📊 ${displayDate}\n\n`;
+  msg += `💰 Balance: AED ${balance.toLocaleString()}\n`;
+  msg += `🛒 Today: AED ${dayExpense.toLocaleString()}`;
   
   await sendMessage(chatId, msg);
 }
@@ -520,20 +505,6 @@ export default async function handler(req, res) {
       case 'yesterday': {
         const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
         await sendDailyReport(chatId, yesterday);
-        break;
-      }
-
-      case 'date_report': {
-        const match = text.match(/(\d{1,2})[\/-](\d{1,2})|(\d{4})[\/-](\d{2})[\/-](\d{2})/);
-        let targetDate;
-        if (match[5]) {
-          targetDate = `${match[3]}-${match[4]}-${match[5]}`;
-        } else {
-          const day = match[1].padStart(2, '0');
-          const month = match[2].padStart(2, '0');
-          targetDate = `2026-${month}-${day}`;
-        }
-        await sendDailyReport(chatId, targetDate);
         break;
       }
 
