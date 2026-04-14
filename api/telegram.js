@@ -66,6 +66,8 @@ function parseIntent(text) {
   // Help/menu
   if (/subscribe|report daily|تقرير يومي|daily report|notify|تنبيه/i.test(t)) return 'subscribe';
   if (/unsubscribe|stop|ايقاف/i.test(t)) return 'unsubscribe';
+  if (/yesterday|امس Hier|gister/i.test(t)) return 'yesterday';
+  if (/(\d{1,2})\/(\d{1,2})|(\d{1,2})-(\d{1,2})|(\d{4})-(\d{2})-(\d{2})/i.test(t)) return 'date_report';
   if (/help|command|menu|option|what.*can.*do|مساعدة|aide|help me|/test(t) || text === '?' || text === '/help' || text === '/start') return 'help';
   
   // Adding transaction - common patterns
@@ -192,32 +194,43 @@ function getYesterdayData(data) {
   return data.filter(t => t.date === yesterday && t.description && t.amount !== 0);
 }
 
-async function sendDailyReport(chatId) {
+async function sendDailyReport(chatId, dateStr = null) {
   const d = await fetchData();
   const monthData = getMonthData(d);
-  const todayData = getTodayData(d);
+  
+  let targetDate;
+  if (dateStr) {
+    targetDate = dateStr;
+  } else {
+    targetDate = new Date().toISOString().slice(0, 10);
+  }
+  
+  const dayData = d.filter(t => t.date === targetDate && t.description && t.amount !== 0);
+  const dayExpense = dayData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const dayIncome = dayData.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   
   const monthIncome = monthData.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const monthExpense = monthData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-  const todayExpense = todayData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-  
   const balance = monthIncome - monthExpense;
   
-  let msg = `📊 <b>Daily Report</b> - ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}\n\n`;
-  msg += `💰 <b>Total Balance:</b> AED ${balance.toLocaleString()}\n`;
-  msg += `💵 Income: AED ${monthIncome.toLocaleString()}\n`;
-  msg += `🛒 Expenses: AED ${monthExpense.toLocaleString()}\n\n`;
+  const displayDate = new Date(targetDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
   
-  msg += `📅 <b>Today:</b> AED ${todayExpense.toLocaleString()}\n`;
+  let msg = `📊 <b>${displayDate}</b>\n\n`;
+  msg += `💰 <b>Month Balance:</b> AED ${balance.toLocaleString()}\n\n`;
+  msg += `📅 <b>${displayDate}:</b>\n`;
+  msg += `💵 Income: AED ${dayIncome.toLocaleString()}\n`;
+  msg += `🛒 Expenses: AED ${dayExpense.toLocaleString()}\n`;
+  msg += `💰 Net: AED ${(dayIncome - dayExpense).toLocaleString()}\n\n`;
   
-  const todayTxns = todayData.filter(t => t.amount < 0);
-  if (todayTxns.length > 0) {
-    msg += `\n<b>Today's Expenses:</b>\n`;
-    todayTxns.forEach(t => {
-      msg += `• ${t.description.substring(0, 25)}: AED ${Math.abs(t.amount).toLocaleString()}\n`;
+  if (dayData.length > 0) {
+    msg += `<b>Transactions:</b>\n`;
+    dayData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    dayData.forEach(t => {
+      const emoji = t.amount > 0 ? '💵' : '🛒';
+      msg += `${emoji} ${t.description.substring(0, 25)}: AED ${Math.abs(t.amount).toLocaleString()}\n`;
     });
   } else {
-    msg += `\n<i>No expenses today</i>`;
+    msg += `<i>No transactions</i>`;
   }
   
   await sendMessage(chatId, msg);
@@ -503,6 +516,26 @@ export default async function handler(req, res) {
         subscribedUsers.delete(chatId);
         await sendMessage(chatId, '❌ <b>Daily Reports Unsubscribed</b>\n\nSend "daily report" to subscribe again.', [[{ text: '📱 Open App', url: APP_URL }]]);
         break;
+
+      case 'yesterday': {
+        const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+        await sendDailyReport(chatId, yesterday);
+        break;
+      }
+
+      case 'date_report': {
+        const match = text.match(/(\d{1,2})[\/-](\d{1,2})|(\d{4})[\/-](\d{2})[\/-](\d{2})/);
+        let targetDate;
+        if (match[5]) {
+          targetDate = `${match[3]}-${match[4]}-${match[5]}`;
+        } else {
+          const day = match[1].padStart(2, '0');
+          const month = match[2].padStart(2, '0');
+          targetDate = `2026-${month}-${day}`;
+        }
+        await sendDailyReport(chatId, targetDate);
+        break;
+      }
 
       case 'balance': {
         const bal = await getBalance(fetchedData);
