@@ -23,7 +23,7 @@
     <script>
       (function() {
         var key = 'av';
-        var ver = '13';
+        var ver = '14';
         var old = localStorage.getItem(key);
         if (old && old !== ver) {
           localStorage.setItem(key, ver);
@@ -31,8 +31,14 @@
             navigator.serviceWorker.getRegistrations().then(function(regs) {
               regs.forEach(function(r) { r.unregister(); });
             });
+            navigator.serviceWorker.register('/sw.js').then(function() {
+              navigator.serviceWorker.ready.then(function() {
+                window.location.href = '/?_=' + Date.now();
+              });
+            });
+          } else {
+            window.location.href = '/?_=' + Date.now();
           }
-          window.location.href = '/?_=' + Date.now();
         } else if (!old) {
           localStorage.setItem(key, ver);
         }

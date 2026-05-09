@@ -5,6 +5,12 @@ import Login from './pages/Login';
 import { isAuthenticated } from './services/auth';
 import './index.css';
 
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    regs.forEach(r => r.unregister());
+  });
+}
+
 function Root() {
   const [authenticated, setAuthenticated] = useState(false);
   const [checked, setChecked] = useState(false);
