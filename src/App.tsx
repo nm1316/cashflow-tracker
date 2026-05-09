@@ -310,7 +310,7 @@ function DesktopTransactionRow({ tx, onEdit, onDelete, isEditing, form, onFormCh
 }
 
 export default function App({ onLogout }: { onLogout: () => void }) {
-  const [selectedMonth, setSelectedMonth] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(MONTH_ORDER[new Date().getMonth()]);
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -337,7 +337,6 @@ export default function App({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     db.init();
-    setSelectedMonth(MONTH_ORDER[new Date().getMonth()]);
     const unsub = db.subscribe((txns) => {
       setAllTransactions(txns);
     });
