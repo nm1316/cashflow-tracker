@@ -23,7 +23,7 @@
     <script>
       (function() {
         var key = 'av';
-        var ver = '12';
+        var ver = '13';
         var old = localStorage.getItem(key);
         if (old && old !== ver) {
           localStorage.setItem(key, ver);
@@ -32,7 +32,7 @@
               regs.forEach(function(r) { r.unregister(); });
             });
           }
-          window.location.reload(true);
+          window.location.href = '/?_=' + Date.now();
         } else if (!old) {
           localStorage.setItem(key, ver);
         }
