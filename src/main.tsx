@@ -5,7 +5,7 @@ import Login from './pages/Login';
 import { isAuthenticated } from './services/auth';
 import './index.css';
 
-const APP_VERSION = '10';
+const APP_VERSION = '11';
 const VERSION_KEY = 'app_v';
 
 if ('serviceWorker' in navigator) {
