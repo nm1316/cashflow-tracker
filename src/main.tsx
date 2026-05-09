@@ -5,8 +5,15 @@ import Login from './pages/Login';
 import { isAuthenticated } from './services/auth';
 import './index.css';
 
+const APP_VERSION = '8';
+
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    if (regs.length > 0) {
+      regs.forEach(r => r.unregister());
+      window.location.reload();
+    }
+  });
 }
 
 function Root() {
