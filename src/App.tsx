@@ -337,15 +337,9 @@ export default function App({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     db.init();
+    setSelectedMonth(MONTH_ORDER[new Date().getMonth()]);
     const unsub = db.subscribe((txns) => {
       setAllTransactions(txns);
-      const filled = txns.filter(t => t.description && t.description.trim().length > 0);
-      if (filled.length > 0) {
-        const sorted = [...filled].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        setSelectedMonth(sorted[0].month);
-      } else {
-        setSelectedMonth(MONTH_ORDER[new Date().getMonth()]);
-      }
     });
     const unsubSync = db.onSyncStatusChange((status) => {
       setSyncStatus(status.syncing ? 'syncing' : status.connected ? 'cloud' : 'offline');
