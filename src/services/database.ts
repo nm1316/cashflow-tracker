@@ -62,10 +62,9 @@ class DB {
   constructor() {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => this.startSync());
-      window.addEventListener('offline', () => this.notifyS({ syncing: false, lastSync: null, connected: false, error: 'Offline' }));
+      window.addEventListener('offline', () => {});
       document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.sync(); });
       window.addEventListener('focus', () => this.sync());
-      window.addEventListener('beforeunload', () => { if (online()) this.pushSync(); });
     }
   }
 
@@ -117,7 +116,7 @@ class DB {
     } catch (e) { console.error('[Sync] Error:', e); }
 
     const qLen = loadQueue().length;
-    this.notifyS({ syncing: false, lastSync: new Date(), connected: true, error: qLen > 0 ? `${qLen} pending` : null });
+    this.notifyS({ syncing: false, lastSync: new Date(), connected: true, error: null });
     this.syncing = false;
   }
 
@@ -162,13 +161,6 @@ class DB {
     this.data = [...this.data, t];
     saveLocal(this.data);
     this.notify();
-    
-    if (online()) {
-      const ok = await pushCloud(this.data);
-      if (!ok) saveQueue([...loadQueue(), { id: t._id, type: 'add', data: t }]);
-    } else {
-      saveQueue([...loadQueue(), { id: t._id, type: 'add', data: t }]);
-    }
     this.sync();
   }
 
@@ -179,7 +171,7 @@ class DB {
       this.data = this.data.map((x, j) => j === i ? t : x);
       saveLocal(this.data);
       this.notify();
-      if (online()) { await pushCloud(this.data); this.sync(); }
+      this.sync();
     }
   }
 
@@ -187,8 +179,7 @@ class DB {
     this.data = this.data.filter(x => x._id !== id);
     saveLocal(this.data);
     this.notify();
-    if (online()) { saveQueue([...loadQueue(), { id, type: 'delete' }]); await pushCloud(this.data); this.sync(); }
-    else saveQueue([...loadQueue(), { id, type: 'delete' }]);
+    this.sync();
   }
 
   exportData(): string { return JSON.stringify(this.data, null, 2); }

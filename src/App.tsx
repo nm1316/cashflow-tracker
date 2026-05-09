@@ -399,7 +399,7 @@ const [selectedMonth, setSelectedMonth] = useState(defaultMonth);
     await db.addTransaction(newTx);
     setAddForm({ date: '', description: '', amount: 0, type: 'Expense', paymentMethod: 'Card' });
     setShowAdd(false);
-    setToast({ message: 'Transaction saved!', type: 'success' });
+    setToast({ message: '✅ Saved', type: 'success' });
   };
 
   return (
