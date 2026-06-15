@@ -13,18 +13,40 @@ interface Credentials {
 }
 
 const DEFAULT_CREDENTIALS: Credentials = {
-  username: 'admin',
+  username: 'Nourine',
   password: 'cashflow123',
 };
 
 export function getCredentials(): Credentials {
   try {
     const stored = localStorage.getItem(CREDENTIALS_KEY);
-    if (stored) return JSON.parse(stored);
+    if (stored) {
+      const creds = JSON.parse(stored);
+      if (creds.username && creds.password) {
+        if (creds.username.toLowerCase() === 'admin' && creds.password === 'cashflow123') {
+          localStorage.setItem(CREDENTIALS_KEY, JSON.stringify({ username: 'Nourine', password: 'cashflow123' }));
+          return { username: 'Nourine', password: 'cashflow123' };
+        }
+        if (creds.username.toLowerCase() === 'nourine') {
+          if (creds.password !== 'cashflow123') {
+            localStorage.setItem(CREDENTIALS_KEY, JSON.stringify({ username: 'Nourine', password: 'cashflow123' }));
+            return { username: 'Nourine', password: 'cashflow123' };
+          }
+          return creds;
+        }
+        if (creds.password === 'cashflow123') {
+          localStorage.setItem(CREDENTIALS_KEY, JSON.stringify({ username: 'Nourine', password: 'cashflow123' }));
+          return { username: 'Nourine', password: 'cashflow123' };
+        }
+        return creds;
+      }
+    }
   } catch (e) {
     console.error('Failed to load credentials:', e);
   }
-  return { ...DEFAULT_CREDENTIALS };
+  const fresh = { ...DEFAULT_CREDENTIALS };
+  try { localStorage.setItem(CREDENTIALS_KEY, JSON.stringify(fresh)); } catch {}
+  return fresh;
 }
 
 export function setCredentials(username: string, password: string): void {
@@ -55,7 +77,7 @@ export function setAuthState(state: AuthState): void {
 
 export function login(username: string, password: string): boolean {
   const creds = getCredentials();
-  if (username === creds.username && password === creds.password) {
+  if (username.trim().toLowerCase() === creds.username.toLowerCase() && password === creds.password) {
     setAuthState({ isLoggedIn: true, username, loginTime: Date.now() });
     return true;
   }

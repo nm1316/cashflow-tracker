@@ -160,9 +160,9 @@ function Dashboard({ transactions, selectedMonth, year }: { transactions: Transa
   );
 }
 
-function MobileDashboard({ transactions, selectedMonth }: { transactions: Transaction[]; selectedMonth: string }) {
+function MobileDashboard({ transactions, selectedMonth, selectedYear }: { transactions: Transaction[]; selectedMonth: string; selectedYear: number }) {
   const filled = transactions.filter(t => t.description && t.amount !== 0);
-  const monthData = filled.filter(t => t.month === selectedMonth && t.year === 2026);
+  const monthData = filled.filter(t => t.month === selectedMonth && t.year === selectedYear);
   const income = monthData.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const expenses = monthData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
   const net = income - expenses;
@@ -304,13 +304,27 @@ function DesktopTransactionRow({ tx, onEdit, onDelete, isEditing, form, onFormCh
       </td>
       <td className="px-3 py-2.5"><span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${tx.amount > 0 ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-400'}`}>{tx.amount > 0 ? 'Income' : 'Expense'}</span></td>
       <td className="px-3 py-2.5"><span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${tx.paymentMethod === 'Card' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400'}`}>{tx.paymentMethod}</span></td>
-      <td className="px-3 py-2.5"><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={onEdit} className="text-[10px] bg-blue-500 text-white px-2 py-1 rounded font-semibold">Edit</button><button onClick={onDelete} className="text-[10px] bg-red-500 text-white px-2 py-1 rounded font-semibold">Del</button></div></td>
+      <td className="px-3 py-2.5"><div className="flex gap-1"><button onClick={onEdit} className="text-[10px] bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded font-semibold">Edit</button><button onClick={onDelete} className="text-[10px] bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded font-semibold">Del</button></div></td>
     </tr>
   );
 }
 
 export default function App({ onLogout }: { onLogout: () => void }) {
-  const [selectedMonth, setSelectedMonth] = useState('May');
+  const initialMonth = (() => {
+    try {
+      const saved = localStorage.getItem('preferred_month');
+      if (saved) {
+        const parts = saved.split('-');
+        if (parts.length >= 2) return { month: parts[0], year: parseInt(parts[parts.length - 1]) };
+      }
+    } catch {}
+    const now = new Date();
+    return { month: MONTHS[now.getMonth()].name, year: now.getFullYear() };
+  })();
+  const [selectedMonth, setSelectedMonth] = useState(initialMonth.month);
+  const [selectedYear, setSelectedYear] = useState(initialMonth.year);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [showCloseModal, setShowCloseModal] = useState(false);
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -318,14 +332,19 @@ export default function App({ onLogout }: { onLogout: () => void }) {
   const [addForm, setAddForm] = useState<NewTransaction>({ date: '', description: '', amount: 0, type: 'Expense', paymentMethod: 'Card' });
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const saved = localStorage.getItem('dark_mode');
+      if (saved !== null) return saved === 'true';
+      return true;
     }
-    return false;
+    return true;
   });
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [syncStatus, setSyncStatus] = useState<'cloud' | 'syncing' | 'offline'>('offline');
   const [pendingCount, setPendingCount] = useState(0);
   const [showExport, setShowExport] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
+  }, []);
 
   useEffect(() => {
     if (darkMode) {
@@ -333,6 +352,7 @@ export default function App({ onLogout }: { onLogout: () => void }) {
     } else {
       document.documentElement.classList.remove('dark');
     }
+    try { localStorage.setItem('dark_mode', String(darkMode)); } catch {}
   }, [darkMode]);
 
   useEffect(() => {
@@ -379,6 +399,7 @@ export default function App({ onLogout }: { onLogout: () => void }) {
     const updated: Transaction = { ...tx, date: dateToUse, description: editForm.description, amount, type: editForm.type, paymentMethod: editForm.paymentMethod, month: MONTH_ORDER[d.getMonth()], year: d.getFullYear() };
     await db.updateTransaction(updated);
     setEditingId(null);
+    setEditForm({ date: '', description: '', amount: 0, type: 'Expense', paymentMethod: 'Card' });
     setAllTransactions(db.getAllTransactions());
     setToast({ message: 'Transaction updated!', type: 'success' });
   };
@@ -411,12 +432,19 @@ export default function App({ onLogout }: { onLogout: () => void }) {
       <header className="sm:hidden bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 pt-4 pb-3 sticky top-0 z-40">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-slate-900 dark:bg-white flex items-center justify-center shrink-0">
-              <span className="text-white dark:text-slate-900 font-bold text-sm">$</span>
-            </div>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+              <defs>
+                <linearGradient id="hm" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#8B5CF6"/>
+                  <stop offset="100%" stop-color="#06B6D4"/>
+                </linearGradient>
+              </defs>
+              <rect width="512" height="512" rx="110" fill="url(#hm)"/>
+              <text x="256" y="335" fontFamily="system-ui,-apple-system,sans-serif" fontSize="280" fontWeight="800" fill="white" textAnchor="middle">$</text>
+            </svg>
             <div>
               <h1 className="text-base font-bold text-slate-900 dark:text-white">My Cashflow</h1>
-              <p className="text-[10px] text-slate-500">{selectedMonth} 2026 · {monthTransactions.length} txns</p>
+              <p className="text-[10px] text-slate-500">{selectedMonth} {selectedYear} · {monthTransactions.length} txns</p>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -441,12 +469,21 @@ export default function App({ onLogout }: { onLogout: () => void }) {
       <header className="hidden sm:block bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 sm:px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-slate-900 dark:bg-white flex items-center justify-center"><span className="text-white dark:text-slate-900 font-bold text-sm">$</span></div>
-            <div>
-              <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">My Cashflow</h1>
-              <p className="text-[10px] text-slate-500">{monthTransactions.length} transactions</p>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="36" height="36">
+                <defs>
+                  <linearGradient id="hg" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#8B5CF6"/>
+                    <stop offset="100%" stop-color="#06B6D4"/>
+                  </linearGradient>
+                </defs>
+                <rect width="512" height="512" rx="110" fill="url(#hg)"/>
+                <text x="256" y="335" fontFamily="system-ui,-apple-system,sans-serif" fontSize="280" fontWeight="800" fill="white" textAnchor="middle">$</text>
+              </svg>
+              <div>
+                <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">My Cashflow</h1>
+                <p className="text-[10px] text-slate-500">{monthTransactions.length} transactions</p>
+              </div>
             </div>
-          </div>
           <div className="flex items-center gap-3">
             <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-semibold ${
               syncStatus === 'cloud' ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400' : 
@@ -492,17 +529,21 @@ export default function App({ onLogout }: { onLogout: () => void }) {
         <div className="max-w-6xl mx-auto">
           <div className="flex items-center gap-1 overflow-x-auto pb-0.5 scrollbar-hide">
             {MONTHS.map(m => (
-              <button key={m.name} onClick={() => { setSelectedMonth(m.name); setEditingId(null); }}
+              <button key={m.name} onClick={() => { setSelectedMonth(m.name); setEditingId(null); try { localStorage.setItem('preferred_month', `${m.name}-${selectedYear}`); } catch {} }}
                 className={`px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 ${selectedMonth === m.name ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>
                 {m.name.slice(0, 3)}
               </button>
             ))}
+            <button onClick={() => setShowCloseModal(true)}
+              className="px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 ml-2">
+              Close Month
+            </button>
           </div>
         </div>
       </div>
 
       {/* Dashboard */}
-      <Dashboard transactions={allTransactions} selectedMonth={selectedMonth} year={2026} />
+      <Dashboard transactions={allTransactions} selectedMonth={selectedMonth} year={selectedYear} />
 
       {/* Desktop Content */}
       <main className="hidden sm:flex flex-col flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 py-4 space-y-4">
@@ -577,7 +618,7 @@ export default function App({ onLogout }: { onLogout: () => void }) {
 
       {/* Mobile Content */}
       <main className="sm:hidden flex flex-col flex-1 px-4 py-3">
-        <MobileDashboard transactions={allTransactions} selectedMonth={selectedMonth} />
+        <MobileDashboard transactions={allTransactions} selectedMonth={selectedMonth} selectedYear={selectedYear} />
         
         {monthTransactions.length > 0 ? (
           <div className="mt-3">
@@ -642,7 +683,54 @@ export default function App({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
       )}
-      
+
+      {/* Close Month Modal */}
+      {showCloseModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center" onClick={() => setShowCloseModal(false)}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl border border-slate-200 dark:border-slate-700" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Close {selectedMonth} {selectedYear}</h2>
+              <button onClick={() => setShowCloseModal(false)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+
+            <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 mb-4 border border-amber-200 dark:border-amber-800">
+              <p className="text-sm text-amber-700 dark:text-amber-300">
+                Closing <strong>{selectedMonth} {selectedYear}</strong> will:
+              </p>
+              <ul className="text-xs text-amber-600 dark:text-amber-400 mt-2 space-y-1">
+                <li>1. Calculate your net savings (income - expenses)</li>
+                <li>2. Create "OPENING BALANCE" in {selectedMonth === 'December' ? 'January' : MONTH_ORDER[MONTH_ORDER.indexOf(selectedMonth) + 1]} automatically</li>
+                <li>3. Set that next month as your default view</li>
+                <li>4. Lock this month from auto-advancing again</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => setShowCloseModal(false)}
+                className="flex-1 h-11 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-semibold text-sm hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                Cancel
+              </button>
+              <button onClick={async () => {
+                db.closeMonth(selectedMonth, selectedYear);
+                const idx = MONTH_ORDER.indexOf(selectedMonth);
+                const nextM = idx === 11 ? 'January' : MONTH_ORDER[idx + 1];
+                const nextY = idx === 11 ? selectedYear + 1 : selectedYear;
+                setSelectedMonth(nextM);
+                setSelectedYear(nextY);
+                try { localStorage.setItem('preferred_month', `${nextM}-${nextY}`); } catch {}
+                setShowCloseModal(false);
+                setToast({ message: `${selectedMonth} closed! Opening balance created in ${nextM}`, type: 'success' });
+              }}
+                className="flex-1 h-11 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold text-sm transition-colors shadow-md">
+                Close & Advance
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes slide-down {
           from { transform: translate(-50%, -100%); opacity: 0; }

@@ -3,15 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#10b981" />
+    <meta name="theme-color" content="#8B5CF6" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="My Cashflow" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="description" content="Personal cashflow and expense tracker - works offline!" />
     <link rel="manifest" href="/manifest.json" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=27" />
+    <link rel="apple-touch-icon" href="/favicon.svg?v=27" />
     <title>My Cashflow</title>
     <style>
       * { -webkit-tap-highlight-color: transparent; }
@@ -23,24 +23,18 @@
     <script>
       (function() {
         var key = 'av';
-        var ver = '14';
-        var old = localStorage.getItem(key);
-        if (old && old !== ver) {
-          localStorage.setItem(key, ver);
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function(regs) {
-              regs.forEach(function(r) { r.unregister(); });
-            });
-            navigator.serviceWorker.register('/sw.js').then(function() {
-              navigator.serviceWorker.ready.then(function() {
-                window.location.href = '/?_=' + Date.now();
-              });
-            });
-          } else {
-            window.location.href = '/?_=' + Date.now();
-          }
-        } else if (!old) {
-          localStorage.setItem(key, ver);
+        var ver = '27';
+        localStorage.setItem(key, ver);
+        localStorage.setItem('preferred_month', 'May');
+        localStorage.removeItem('cashflow_cache');
+
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function(regs) {
+            regs.forEach(function(r) { r.unregister(); });
+          });
+        }
+        if ('caches' in window) {
+          caches.keys().then(function(names) { names.forEach(function(n) { caches.delete(n); }); });
         }
       })();
     </script>

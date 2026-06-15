@@ -5,8 +5,12 @@ const JSONBIN_BIN_ID = '69d223dd856a682189ff28c7';
 const JSONBIN_API_KEY = '$2a$10$QwwAuP12n..jYPPFfwVAZuEzgLY3mtZLdcE.Pac5OV/U12k8AQFqG';
 const LOCAL_KEY = 'cashflow_data';
 const QUEUE_KEY = 'cashflow_queue';
+const LAST_SYNC_KEY = 'cashflow_last_sync';
+const SYNC_VERSION_KEY = 'av';
+const CLOSED_MONTHS_KEY = 'cashflow_closed_months';
+const AUTO_ADVANCE_KEY = 'cashflow_auto_advance';
 
-interface QueueOp { id: string; type: 'add' | 'update' | 'delete'; data?: Transaction; }
+interface QueueOp { id: string; type: 'add' | 'update' | 'delete'; data?: Transaction; retries?: number; }
 
 const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -22,34 +26,164 @@ function getInitialData(): Transaction[] {
   return d.map(t => t._id ? t : { ...t, _id: `tx-${now}-${Math.random().toString(36).slice(2, 6)}` });
 }
 
-function saveLocal(data: Transaction[]): void { localStorage.setItem(LOCAL_KEY, JSON.stringify(data)); }
+function saveLocalSafe(data: Transaction[]): boolean {
+  try {
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
+    return true;
+} catch (e) {
+      try {
+        const half = Math.floor(data.length / 2);
+        localStorage.setItem(LOCAL_KEY, JSON.stringify(data.slice(0, half)));
+      } catch {}
+      return false;
+    }
+}
+
 function loadLocal(): Transaction[] {
-  try { const s = localStorage.getItem(LOCAL_KEY); if (s) { const p = JSON.parse(s); if (Array.isArray(p) && p.length > 0) return p; } } catch {}
+  try {
+    const s = localStorage.getItem(LOCAL_KEY);
+    if (s) {
+      const p = JSON.parse(s);
+      if (Array.isArray(p) && p.length > 0) return p;
+    }
+} catch (e) {}
   return [];
 }
 
 async function pushCloud(data: Transaction[]): Promise<boolean> {
-  try { const r = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY }, body: JSON.stringify(data) }); return r.ok; } catch { return false; }
+  try {
+    const r = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
+      body: JSON.stringify(data)
+    });
+    if (r.ok) {
+      try { localStorage.setItem(LAST_SYNC_KEY, String(Date.now())); } catch {}
+      return true;
+    }
+  } catch {}
+  return false;
 }
 
 async function pullCloud(): Promise<Transaction[] | null> {
-  try { const r = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, { method: 'GET', headers: { 'X-Master-Key': JSONBIN_API_KEY } }); if (r.ok) { const d = await r.json(); if (d.record && Array.isArray(d.record) && d.record.length > 0) return d.record; } } catch {}
+  try {
+    const r = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, {
+      method: 'GET',
+      headers: { 'X-Master-Key': JSONBIN_API_KEY }
+    });
+    if (r.ok) {
+      const d = await r.json();
+      if (d.record && Array.isArray(d.record) && d.record.length > 0) return d.record;
+    }
+  } catch {}
   return null;
 }
 
-function normalize(data: Transaction[]): Transaction[] { return data.map(t => ({ ...t, paymentMethod: t.paymentMethod === 'Cash' ? 'Cash' : 'Card', _id: t._id || `tx-${Date.now()}-${Math.random().toString(36).slice(2,6)}` })); }
-function online(): boolean { return typeof navigator !== 'undefined' ? navigator.onLine : true; }
-function loadQueue(): QueueOp[] { try { const s = localStorage.getItem(QUEUE_KEY); return s ? JSON.parse(s) : []; } catch { return []; } }
-function saveQueue(q: QueueOp[]): void { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); }
+function normalize(data: Transaction[]): Transaction[] {
+  return data.map(t => ({
+    ...t,
+    paymentMethod: t.paymentMethod === 'Cash' ? 'Cash' : 'Card',
+    _id: t._id || `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  }));
+}
 
-function mergeData(local: Transaction[], incoming: Transaction[]): Transaction[] {
+function loadQueue(): QueueOp[] {
+  try {
+    const s = localStorage.getItem(QUEUE_KEY);
+    return s ? JSON.parse(s) : [];
+  } catch { return []; }
+}
+
+function saveQueue(q: QueueOp[]): void {
+  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch {}
+}
+
+function mergeData(local: Transaction[], incoming: Transaction[], pendingDeletes: Set<string>): Transaction[] {
+  const deletedIds = pendingDeletes;
   const merged = [...local];
   for (const t of incoming) {
+    if (deletedIds.has(t._id)) continue;
     const i = merged.findIndex(x => x._id === t._id);
     if (i >= 0) merged[i] = t;
     else merged.push(t);
   }
   return merged.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+}
+function getMonthSummary(data: Transaction[], month: string, year: number): { income: number; expenses: number; net: number } {
+  const filled = data.filter(t => t.month === month && t.year === year && t.description && t.amount !== 0);
+  const income = filled.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+  const expenses = filled.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  return { income, expenses, net: income - expenses };
+}
+
+function getNextMonth(currentMonth: string, currentYear: number): { month: string; year: number } {
+  const idx = months.indexOf(currentMonth);
+  if (idx === 11) return { month: 'January', year: currentYear + 1 };
+  return { month: months[idx + 1], year: currentYear };
+}
+
+function getClosedMonths(): string[] {
+  try {
+    const s = localStorage.getItem(CLOSED_MONTHS_KEY);
+    return s ? JSON.parse(s) : [];
+  } catch { return []; }
+}
+
+function saveClosedMonths(m: string[]): void {
+  try { localStorage.setItem(CLOSED_MONTHS_KEY, JSON.stringify(m)); } catch {}
+}
+
+function autoAdvanceMonth(data: Transaction[]): { transaction?: Transaction; newMonth: string; newYear: number } | null {
+  try {
+    const closed = getClosedMonths();
+    const now = new Date();
+    const currentMonth = months[now.getMonth()];
+    const currentYear = now.getFullYear();
+
+    const { month: latestMonth, year: latestYear } = (() => {
+      let maxYear = 0;
+      let maxMonthIdx = -1;
+      data.forEach(t => {
+        if (t.year > maxYear || (t.year === maxYear && months.indexOf(t.month) > maxMonthIdx)) {
+          maxYear = t.year;
+          maxMonthIdx = months.indexOf(t.month);
+        }
+      });
+      if (maxMonthIdx < 0) return { month: currentMonth, year: currentYear };
+      return { month: months[maxMonthIdx], year: maxYear };
+    })();
+
+    const closedKey = `${latestMonth}-${latestYear}`;
+    if (closed.includes(closedKey)) return null;
+
+    const { income, expenses, net } = getMonthSummary(data, latestMonth, latestYear);
+    if (income === 0 && expenses === 0) return null;
+
+    const { month: nextMonth, year: nextYear } = getNextMonth(latestMonth, latestYear);
+    const closingDate = `${String(nextYear)}-${String(months.indexOf(nextMonth) + 1).padStart(2, '0')}-01`;
+    const hasOpeningBalance = data.some(t => t.month === nextMonth && t.year === nextYear && t.description.toLowerCase().includes('opening balance'));
+
+    if (!hasOpeningBalance) {
+      return {
+        transaction: {
+          _id: `auto-ob-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          date: closingDate,
+          description: 'OPENING BALANCE',
+          amount: net,
+          type: net >= 0 ? 'Income' : 'Expense',
+          paymentMethod: 'Card',
+          month: nextMonth,
+          year: nextYear,
+        },
+        newMonth: nextMonth,
+        newYear: nextYear,
+      };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 class DB {
@@ -57,111 +191,227 @@ class DB {
   private ss: Set<(s: SyncStatus) => void> = new Set();
   private data: Transaction[] = [];
   private syncing = false;
+  private dirty = false;
   private interval: ReturnType<typeof setInterval> | null = null;
+  private pendingSync = false;
+  private onlineState = true;
 
   constructor() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => this.startSync());
-      window.addEventListener('offline', () => {});
+      window.addEventListener('online', () => { this.onlineState = true; this.startSync(); });
+      window.addEventListener('offline', () => { this.onlineState = false; this.notifyS({ syncing: false, lastSync: null, connected: false, error: null }); });
       document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.sync(); });
       window.addEventListener('focus', () => this.sync());
     }
   }
 
   startSync(): void {
-    this.notifyS({ syncing: false, lastSync: null, connected: true, error: null });
+    this.notifyS({ syncing: false, lastSync: null, connected: this.onlineState, error: null });
     this.sync();
     if (this.interval) clearInterval(this.interval);
-    this.interval = setInterval(() => this.sync(), 2000);
+    this.interval = setInterval(() => this.sync(), 3000);
   }
 
-  private async pushSync(): Promise<void> {
-    if (!online()) return;
-    const q = loadQueue();
-    if (q.length > 0) {
+  private async syncNow(): Promise<void> {
+    if (this.syncing) return;
+    this.syncing = true;
+    this.pendingSync = false;
+    try {
+      const q = loadQueue();
+      const pendingDeletes = new Set(q.filter(op => op.type === 'delete').map(op => op.id));
+      const cloud = await pullCloud();
+
+      if (cloud && cloud.length > 0 && pendingDeletes.size > 0) {
+        const cData = normalize(cloud);
+        this.data = mergeData(this.data, cData, pendingDeletes);
+      }
+
       for (const op of q) {
         if (op.type === 'add' && op.data && !this.data.find(t => t._id === op.data._id)) this.data.push(op.data);
+        if (op.type === 'update' && op.data) {
+          const idx = this.data.findIndex(t => t._id === op.data._id);
+          if (idx >= 0) this.data[idx] = op.data;
+        }
         if (op.type === 'delete') this.data = this.data.filter(t => t._id !== op.id);
       }
-      const ok = await pushCloud(this.data);
-      if (ok) saveQueue([]);
+
+      saveLocalSafe(this.data);
+      await pushCloud(this.data);
+      saveQueue([]);
+      this.dirty = false;
+      this.notify();
+      const lastSyncTime = localStorage.getItem(LAST_SYNC_KEY);
+      const lastSync = lastSyncTime ? new Date(parseInt(lastSyncTime)) : null;
+      this.notifyS({ syncing: false, lastSync, connected: true, error: null });
+    } catch (e) {
+      this.notifyS({ syncing: false, lastSync: null, connected: this.onlineState, error: 'Sync failed' });
     }
+    this.syncing = false;
+    if (this.pendingSync || this.dirty) setTimeout(() => this.syncNow(), 500);
   }
 
   private async sync(): Promise<void> {
-    if (this.syncing) return;
-    if (!online()) return;
+    if (this.syncing) {
+      this.pendingSync = true;
+      return;
+    }
+    if (!this.onlineState) return;
     this.syncing = true;
+    this.pendingSync = false;
 
     try {
-      const cloud = await pullCloud();
       const q = loadQueue();
+      const pendingDeletes = new Set(q.filter(op => op.type === 'delete').map(op => op.id));
 
-      if (cloud) {
-        const cData = normalize(cloud);
-        this.data = mergeData(this.data, cData);
+      if (pendingDeletes.size > 0) {
+        const cloud = await pullCloud();
+        if (cloud && cloud.length > 0) {
+          const cData = normalize(cloud);
+          this.data = mergeData(this.data, cData, pendingDeletes);
+        }
       }
 
       for (const op of q) {
         if (op.type === 'add' && op.data && !this.data.find(t => t._id === op.data._id)) this.data.push(op.data);
+        if (op.type === 'update' && op.data) {
+          const idx = this.data.findIndex(t => t._id === op.data._id);
+          if (idx >= 0) this.data[idx] = op.data;
+        }
         if (op.type === 'delete') this.data = this.data.filter(t => t._id !== op.id);
       }
 
+      saveLocalSafe(this.data);
       const ok = await pushCloud(this.data);
       if (ok) {
-        saveLocal(this.data);
         saveQueue([]);
+        this.dirty = false;
         this.notify();
+      } else {
+        for (const op of q) {
+          op.retries = (op.retries || 0) + 1;
+        }
+        const retryQ = q.filter(op => (op.retries || 0) < 5);
+        saveQueue(retryQ);
       }
-    } catch (e) { console.error('[Sync] Error:', e); }
 
-    const qLen = loadQueue().length;
-    this.notifyS({ syncing: false, lastSync: new Date(), connected: true, error: null });
+      const lastSyncTime = localStorage.getItem(LAST_SYNC_KEY);
+      const lastSync = lastSyncTime ? new Date(parseInt(lastSyncTime)) : null;
+      this.notifyS({ syncing: false, lastSync, connected: true, error: null });
+
+    } catch (e) {
+      this.notifyS({ syncing: false, lastSync: null, connected: this.onlineState, error: 'Sync failed' });
+    }
+
     this.syncing = false;
+    if (this.pendingSync || this.dirty) {
+      setTimeout(() => this.sync(), 500);
+    }
   }
 
   async init(): Promise<void> {
     this.data = loadLocal();
-    
-    if (this.data.length === 0) {
+    let loaded = this.data.length > 0;
+
+    const q = loadQueue();
+    const pendingDeletes = new Set(q.filter(op => op.type === 'delete').map(op => op.id));
+
+    if (!loaded) {
       const cloud = await pullCloud();
       if (cloud && cloud.length > 0) {
         this.data = normalize(cloud);
-      } else {
-        this.data = normalize(getInitialData());
+        loaded = true;
       }
-    } else {
+    }
+
+    if (!loaded) {
+      this.data = normalize(getInitialData());
+    } else if (pendingDeletes.size > 0) {
       const cloud = await pullCloud();
       if (cloud && cloud.length > 0) {
         const cData = normalize(cloud);
-        this.data = mergeData(this.data, cData);
+        this.data = mergeData(this.data, cData, pendingDeletes);
       }
     }
 
-    const q = loadQueue();
     for (const op of q) {
       if (op.type === 'add' && op.data && !this.data.find(t => t._id === op.data._id)) this.data.push(op.data);
+      if (op.type === 'update' && op.data) {
+        const idx = this.data.findIndex(t => t._id === op.data._id);
+        if (idx >= 0) this.data[idx] = op.data;
+      }
       if (op.type === 'delete') this.data = this.data.filter(t => t._id !== op.id);
     }
 
-    saveLocal(this.data);
+    const auto = autoAdvanceMonth(this.data);
+    if (auto?.transaction) {
+      this.data = [...this.data, auto.transaction];
+      try { localStorage.setItem(AUTO_ADVANCE_KEY, JSON.stringify({ from: 'May', to: auto.newMonth, net: auto.transaction.amount })); } catch {}
+    }
+
+    saveLocalSafe(this.data);
     this.notify();
     this.startSync();
+  }
+
+  closeMonth(month: string, year: number): void {
+    const closed = getClosedMonths();
+    const key = `${month}-${year}`;
+    if (!closed.includes(key)) {
+      closed.push(key);
+      saveClosedMonths(closed);
+    }
+    try { localStorage.removeItem(AUTO_ADVANCE_KEY); } catch {}
+  }
+
+  getCurrentDisplayMonth(): { month: string; year: number } {
+    try {
+      const saved = localStorage.getItem('preferred_month');
+      if (saved) {
+        const parts = saved.split('-');
+        if (parts.length === 2) return { month: parts[0], year: parseInt(parts[1]) };
+      }
+    } catch {}
+    return { month: 'May', year: 2026 };
+  }
+
+  setDisplayMonth(month: string, year: number): void {
+    try { localStorage.setItem('preferred_month', `${month}-${year}`); } catch {}
   }
 
   private notify(): void { this.ls.forEach(cb => cb([...this.data])); }
   private notifyS(s: SyncStatus): void { this.ss.forEach(cb => cb(s)); }
 
-  subscribe(cb: (t: Transaction[]) => void): () => void { this.ls.add(cb); cb([...this.data]); return () => this.ls.delete(cb); }
-  onSyncStatusChange(cb: (s: SyncStatus) => void): () => void { this.ss.add(cb); cb({ syncing: false, lastSync: null, connected: online(), error: null }); return () => this.ss.delete(cb); }
+  subscribe(cb: (t: Transaction[]) => void): () => void {
+    this.ls.add(cb);
+    cb([...this.data]);
+    return () => this.ls.delete(cb);
+  }
+
+  onSyncStatusChange(cb: (s: SyncStatus) => void): () => void {
+    this.ss.add(cb);
+    cb({ syncing: false, lastSync: null, connected: this.onlineState, error: null });
+    return () => this.ss.delete(cb);
+  }
+
   getAllTransactions(): Transaction[] { return [...this.data]; }
+  isOnline(): boolean { return this.onlineState; }
+  getLastSync(): Date | null {
+    const ts = localStorage.getItem(LAST_SYNC_KEY);
+    return ts ? new Date(parseInt(ts)) : null;
+  }
 
   async addTransaction(tx: Transaction): Promise<void> {
     const t = normalize([tx])[0];
     this.data = [...this.data, t];
-    saveLocal(this.data);
+    this.dirty = true;
+    saveLocalSafe(this.data);
     this.notify();
-    this.sync();
+
+    const q = loadQueue();
+    q.push({ id: t._id, type: 'add', data: t });
+    saveQueue(q);
+
+    if (this.onlineState) this.syncNow();
   }
 
   async updateTransaction(tx: Transaction): Promise<void> {
@@ -169,23 +419,50 @@ class DB {
     const i = this.data.findIndex(x => x._id === tx._id);
     if (i >= 0) {
       this.data = this.data.map((x, j) => j === i ? t : x);
-      saveLocal(this.data);
+      this.dirty = true;
+      saveLocalSafe(this.data);
       this.notify();
-      this.sync();
+
+      const q = loadQueue();
+      const existingIdx = q.findIndex(op => op.id === t._id);
+      if (existingIdx >= 0) {
+        q[existingIdx] = { id: t._id, type: 'update', data: t };
+      } else {
+        q.push({ id: t._id, type: 'update', data: t });
+      }
+      saveQueue(q);
+
+      if (this.onlineState) this.syncNow();
     }
   }
 
   async deleteTransaction(id: string): Promise<void> {
     this.data = this.data.filter(x => x._id !== id);
-    saveLocal(this.data);
+    this.dirty = true;
+    saveLocalSafe(this.data);
     this.notify();
-    this.sync();
+
+    const q = loadQueue();
+    q.push({ id, type: 'delete' });
+    saveQueue(q);
+
+    if (this.onlineState) this.syncNow();
   }
 
   exportData(): string { return JSON.stringify(this.data, null, 2); }
 
   async importData(json: string): Promise<boolean> {
-    try { const p = JSON.parse(json); if (Array.isArray(p)) { this.data = normalize(p); saveLocal(this.data); this.notify(); await pushCloud(this.data); return true; } } catch {}
+    try {
+      const p = JSON.parse(json);
+      if (Array.isArray(p)) {
+        this.data = normalize(p);
+        saveLocalSafe(this.data);
+        this.dirty = true;
+        this.notify();
+        await pushCloud(this.data);
+        return true;
+      }
+    } catch {}
     return false;
   }
 
