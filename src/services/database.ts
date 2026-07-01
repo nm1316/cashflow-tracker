@@ -68,8 +68,8 @@ async function pushCloud(data: Transaction[]): Promise<boolean> {
 async function pullCloud(): Promise<Transaction[] | null> {
   const sources = [
     { url: `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, headers: { 'X-Master-Key': JSONBIN_API_KEY }, extract: (d: any) => d.record },
-    { url: '/data.json', extract: (d: any) => d },
     { url: '/api/data', extract: (d: any) => (Array.isArray(d) ? d : d?.record || d?.data) },
+    { url: '/data.json', extract: (d: any) => d },
   ];
   for (const src of sources) {
     try {
@@ -433,21 +433,24 @@ class DB {
       if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
     }
 
-    try {
-      const r = await fetch('/api/data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(allData)
-      });
-      if (r.ok) {
-        try { localStorage.setItem(LAST_SYNC_KEY, String(Date.now())); } catch {}
-        try { localStorage.setItem(QUEUE_KEY, '[]'); } catch {}
-        this.dirty = false;
-        return { success: true, count: allData.length };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const r = await fetch('/api/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(allData)
+        });
+        if (r.ok) {
+          try { localStorage.setItem(LAST_SYNC_KEY, String(Date.now())); } catch {}
+          try { localStorage.setItem(QUEUE_KEY, '[]'); } catch {}
+          this.dirty = false;
+          return { success: true, count: allData.length };
+        }
+        lastErr = `/api/data returned ${r.status}`;
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : '/api/data network error';
       }
-      lastErr = `/api/data returned ${r.status}`;
-    } catch (e) {
-      lastErr = e instanceof Error ? e.message : '/api/data network error';
+      if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
     }
 
     return { success: false, count: allData.length, error: lastErr };
