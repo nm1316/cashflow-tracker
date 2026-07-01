@@ -51,21 +51,25 @@ function loadLocal(): Transaction[] {
 }
 
 async function pushCloud(data: Transaction[]): Promise<boolean> {
+  const endpoint = '/api/data';
+  for (let i = 0; i < 3; i++) {
+    try {
+      const r = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (r.ok) {
+        try { localStorage.setItem(LAST_SYNC_KEY, String(Date.now())); } catch {}
+        return true;
+      }
+    } catch {}
+    if (i < 2) await new Promise(r => setTimeout(r, 500));
+  }
   try {
     const r = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-      body: JSON.stringify(data)
-    });
-    if (r.ok) {
-      try { localStorage.setItem(LAST_SYNC_KEY, String(Date.now())); } catch {}
-      return true;
-    }
-  } catch {}
-  try {
-    const r = await fetch('/api/data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
     if (r.ok) {
@@ -302,6 +306,7 @@ class DB {
 
     saveLocalSafe(this.data);
     this.notify();
+    this.dirty = true;
     this.startSync();
   }
 
@@ -419,6 +424,26 @@ class DB {
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
+        const r = await fetch('/api/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(allData)
+        });
+        if (r.ok) {
+          try { localStorage.setItem(LAST_SYNC_KEY, String(Date.now())); } catch {}
+          try { localStorage.setItem(QUEUE_KEY, '[]'); } catch {}
+          this.dirty = false;
+          return { success: true, count: allData.length };
+        }
+        lastErr = `/api/data returned ${r.status}`;
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : '/api/data error';
+      }
+      if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
+    }
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
         const r = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
@@ -433,26 +458,6 @@ class DB {
         lastErr = `JSONBin returned ${r.status}`;
       } catch (e) {
         lastErr = e instanceof Error ? e.message : 'JSONBin network error';
-      }
-      if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
-    }
-
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const r = await fetch('/api/data', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(allData)
-        });
-        if (r.ok) {
-          try { localStorage.setItem(LAST_SYNC_KEY, String(Date.now())); } catch {}
-          try { localStorage.setItem(QUEUE_KEY, '[]'); } catch {}
-          this.dirty = false;
-          return { success: true, count: allData.length };
-        }
-        lastErr = `/api/data returned ${r.status}`;
-      } catch (e) {
-        lastErr = e instanceof Error ? e.message : '/api/data network error';
       }
       if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
     }
