@@ -76,6 +76,10 @@ async function pullCloud(): Promise<Transaction[] | null> {
       if (d.record && Array.isArray(d.record) && d.record.length > 0) return d.record;
     }
   } catch {}
+  try {
+    const r = await fetch('/data.json');
+    if (r.ok) { const d = await r.json(); if (Array.isArray(d) && d.length > 0) return d; }
+  } catch {}
   return null;
 }
 
