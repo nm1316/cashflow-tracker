@@ -1,6 +1,8 @@
 const BIN_ID = process.env.JSONBIN_BIN_ID || '69d223dd856a682189ff28c7';
 const API_KEY = process.env.JSONBIN_API_KEY || '$2a$10$QwwAuP12n..jYPPFfwVAZuEzgLY3mtZLdcE.Pac5OV/U12k8AQFqG';
 
+let memCache = null;
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -9,12 +11,19 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
+      if (memCache && Array.isArray(memCache) && memCache.length > 0) {
+        return res.status(200).json(memCache);
+      }
       const r = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
         headers: { 'X-Master-Key': API_KEY }
       });
       if (r.ok) {
         const d = await r.json();
-        return res.status(200).json(d.record || d);
+        const data = d.record || d;
+        if (Array.isArray(data) && data.length > 0) {
+          memCache = data;
+          return res.status(200).json(data);
+        }
       }
       return res.status(200).json([]);
     }
@@ -24,6 +33,7 @@ export default async function handler(req, res) {
       let json;
       try { json = JSON.parse(body); } catch { json = []; }
       const count = Array.isArray(json) ? json.length : 0;
+      if (Array.isArray(json) && json.length > 0) memCache = json;
       try {
         await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
           method: 'PUT',
