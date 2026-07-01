@@ -367,7 +367,19 @@ export default function App({ onLogout }: { onLogout: () => void }) {
     return () => { unsub(); unsubSync(); };
   }, []);
   
+  const [emergencySyncing, setEmergencySyncing] = useState(false);
   const handleManualSync = () => { db.refresh(); };
+  const handleEmergencySync = async () => {
+    if (emergencySyncing) return;
+    setEmergencySyncing(true);
+    const result = await db.forcePushNow();
+    setEmergencySyncing(false);
+    if (result.success) {
+      setToast({ message: `✅ Force sync complete! ${result.count} transactions pushed to cloud.`, type: 'success' });
+    } else {
+      setToast({ message: `❌ Force sync failed: ${result.error || 'Unknown error'}`, type: 'error' });
+    }
+  };
 
   const filledTransactions = useMemo(() => 
     allTransactions.filter(t => t.description && t.description.trim().length > 0),
@@ -455,6 +467,9 @@ export default function App({ onLogout }: { onLogout: () => void }) {
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
               )}
             </button>
+            <button onClick={handleEmergencySync} disabled={emergencySyncing} className="w-9 h-9 flex items-center justify-center text-red-500 hover:text-red-700 rounded-full hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-40" title="Emergency Force Sync">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86l-8.26 14.28A1.73 1.73 0 0 0 3.48 21h17.04a1.73 1.73 0 0 0 1.47-2.86L13.71 3.86a1.73 1.73 0 0 0-3.42 0z"/></svg>
+            </button>
             <button onClick={onLogout} className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-red-500 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             </button>
@@ -502,6 +517,10 @@ export default function App({ onLogout }: { onLogout: () => void }) {
             <button onClick={handleManualSync} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-500 px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
               Sync
+            </button>
+            <button onClick={handleEmergencySync} disabled={emergencySyncing} className="flex items-center gap-1.5 text-xs text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400 px-3 py-1.5 rounded-lg font-semibold shadow-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86l-8.26 14.28A1.73 1.73 0 0 0 3.48 21h17.04a1.73 1.73 0 0 0 1.47-2.86L13.71 3.86a1.73 1.73 0 0 0-3.42 0z"/></svg>
+              {emergencySyncing ? 'Pushing...' : 'Force Sync'}
             </button>
             <button onClick={() => { const data = db.exportData(); const blob = new Blob([data], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `cashflow-backup-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-500 px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>

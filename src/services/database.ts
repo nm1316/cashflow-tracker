@@ -1,8 +1,8 @@
 import type { Transaction, SyncStatus } from '../types';
 import { march2026Data, january2026Data, february2026Data, april2026Data, may2026Data, june2026Data, july2026Data, august2026Data, september2026Data, october2026Data, november2026Data, december2026Data } from '../data/transactions';
 
-const JSONBIN_BIN_ID = '69d223dd856a682189ff28c7';
-const JSONBIN_API_KEY = '$2a$10$QwwAuP12n..jYPPFfwVAZuEzgLY3mtZLdcE.Pac5OV/U12k8AQFqG';
+const JSONBIN_BIN_ID = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_JSONBIN_BIN_ID) || '69d223dd856a682189ff28c7';
+const JSONBIN_API_KEY = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_JSONBIN_API_KEY) || '$2a$10$QwwAuP12n..jYPPFfwVAZuEzgLY3mtZLdcE.Pac5OV/U12k8AQFqG';
 const LOCAL_KEY = 'cashflow_data';
 const QUEUE_KEY = 'cashflow_queue';
 const LAST_SYNC_KEY = 'cashflow_last_sync';
@@ -66,20 +66,21 @@ async function pushCloud(data: Transaction[]): Promise<boolean> {
 }
 
 async function pullCloud(): Promise<Transaction[] | null> {
-  try {
-    const r = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, {
-      method: 'GET',
-      headers: { 'X-Master-Key': JSONBIN_API_KEY }
-    });
-    if (r.ok) {
-      const d = await r.json();
-      if (d.record && Array.isArray(d.record) && d.record.length > 0) return d.record;
-    }
-  } catch {}
-  try {
-    const r = await fetch('/data.json');
-    if (r.ok) { const d = await r.json(); if (Array.isArray(d) && d.length > 0) return d; }
-  } catch {}
+  const sources = [
+    { url: `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, headers: { 'X-Master-Key': JSONBIN_API_KEY }, extract: (d: any) => d.record },
+    { url: '/data.json', extract: (d: any) => d },
+    { url: '/api/data', extract: (d: any) => (Array.isArray(d) ? d : d?.record || d?.data) },
+  ];
+  for (const src of sources) {
+    try {
+      const r = await fetch(src.url, { headers: src.headers || {} });
+      if (r.ok) {
+        const d = await r.json();
+        const data = src.extract(d);
+        if (Array.isArray(data) && data.length > 0) return data;
+      }
+    } catch {}
+  }
   return null;
 }
 
@@ -211,70 +212,24 @@ class DB {
 
   startSync(): void {
     this.notifyS({ syncing: false, lastSync: null, connected: this.onlineState, error: null });
-    this.sync();
+    this.flush();
     if (this.interval) clearInterval(this.interval);
-    this.interval = setInterval(() => this.sync(), 3000);
+    this.interval = setInterval(() => this.flush(), 3000);
   }
 
-  private async syncNow(): Promise<void> {
-    if (this.syncing) return;
+  private async flush(): Promise<void> {
+    if (this.syncing) { this.pendingSync = true; return; }
+    if (!this.onlineState) { this.pendingSync = true; return; }
     this.syncing = true;
     this.pendingSync = false;
     try {
       const q = loadQueue();
+      if (q.length === 0 && !this.dirty) { this.syncing = false; return; }
       const pendingDeletes = new Set(q.filter(op => op.type === 'delete').map(op => op.id));
-      const cloud = await pullCloud();
-
-      if (cloud && cloud.length > 0 && pendingDeletes.size > 0) {
-        const cData = normalize(cloud);
-        this.data = mergeData(this.data, cData, pendingDeletes);
-      }
-
-      for (const op of q) {
-        if (op.type === 'add' && op.data && !this.data.find(t => t._id === op.data._id)) this.data.push(op.data);
-        if (op.type === 'update' && op.data) {
-          const idx = this.data.findIndex(t => t._id === op.data._id);
-          if (idx >= 0) this.data[idx] = op.data;
-        }
-        if (op.type === 'delete') this.data = this.data.filter(t => t._id !== op.id);
-      }
-
-      saveLocalSafe(this.data);
-      await pushCloud(this.data);
-      saveQueue([]);
-      this.dirty = false;
-      this.notify();
-      const lastSyncTime = localStorage.getItem(LAST_SYNC_KEY);
-      const lastSync = lastSyncTime ? new Date(parseInt(lastSyncTime)) : null;
-      this.notifyS({ syncing: false, lastSync, connected: true, error: null });
-    } catch (e) {
-      this.notifyS({ syncing: false, lastSync: null, connected: this.onlineState, error: 'Sync failed' });
-    }
-    this.syncing = false;
-    if (this.pendingSync || this.dirty) setTimeout(() => this.syncNow(), 500);
-  }
-
-  private async sync(): Promise<void> {
-    if (this.syncing) {
-      this.pendingSync = true;
-      return;
-    }
-    if (!this.onlineState) return;
-    this.syncing = true;
-    this.pendingSync = false;
-
-    try {
-      const q = loadQueue();
-      const pendingDeletes = new Set(q.filter(op => op.type === 'delete').map(op => op.id));
-
       if (pendingDeletes.size > 0) {
         const cloud = await pullCloud();
-        if (cloud && cloud.length > 0) {
-          const cData = normalize(cloud);
-          this.data = mergeData(this.data, cData, pendingDeletes);
-        }
+        if (cloud && cloud.length > 0) this.data = mergeData(this.data, normalize(cloud), pendingDeletes);
       }
-
       for (const op of q) {
         if (op.type === 'add' && op.data && !this.data.find(t => t._id === op.data._id)) this.data.push(op.data);
         if (op.type === 'update' && op.data) {
@@ -283,33 +238,22 @@ class DB {
         }
         if (op.type === 'delete') this.data = this.data.filter(t => t._id !== op.id);
       }
-
       saveLocalSafe(this.data);
       const ok = await pushCloud(this.data);
-      if (ok) {
-        saveQueue([]);
-        this.dirty = false;
-        this.notify();
-      } else {
-        for (const op of q) {
-          op.retries = (op.retries || 0) + 1;
-        }
-        const retryQ = q.filter(op => (op.retries || 0) < 5);
+      if (ok) { saveQueue([]); this.dirty = false; this.notify(); }
+      else {
+        const retryQ = q.filter(op => (op.retries || 0) < 10);
+        retryQ.forEach(op => op.retries = (op.retries || 0) + 1);
         saveQueue(retryQ);
       }
-
       const lastSyncTime = localStorage.getItem(LAST_SYNC_KEY);
       const lastSync = lastSyncTime ? new Date(parseInt(lastSyncTime)) : null;
       this.notifyS({ syncing: false, lastSync, connected: true, error: null });
-
-    } catch (e) {
+    } catch {
       this.notifyS({ syncing: false, lastSync: null, connected: this.onlineState, error: 'Sync failed' });
     }
-
     this.syncing = false;
-    if (this.pendingSync || this.dirty) {
-      setTimeout(() => this.sync(), 500);
-    }
+    if (this.pendingSync || this.dirty) setTimeout(() => this.flush(), 500);
   }
 
   async init(): Promise<void> {
@@ -410,12 +354,10 @@ class DB {
     this.dirty = true;
     saveLocalSafe(this.data);
     this.notify();
-
     const q = loadQueue();
     q.push({ id: t._id, type: 'add', data: t });
     saveQueue(q);
-
-    if (this.onlineState) this.syncNow();
+    this.flush();
   }
 
   async updateTransaction(tx: Transaction): Promise<void> {
@@ -426,17 +368,12 @@ class DB {
       this.dirty = true;
       saveLocalSafe(this.data);
       this.notify();
-
       const q = loadQueue();
       const existingIdx = q.findIndex(op => op.id === t._id);
-      if (existingIdx >= 0) {
-        q[existingIdx] = { id: t._id, type: 'update', data: t };
-      } else {
-        q.push({ id: t._id, type: 'update', data: t });
-      }
+      if (existingIdx >= 0) q[existingIdx] = { id: t._id, type: 'update', data: t };
+      else q.push({ id: t._id, type: 'update', data: t });
       saveQueue(q);
-
-      if (this.onlineState) this.syncNow();
+      this.flush();
     }
   }
 
@@ -445,12 +382,10 @@ class DB {
     this.dirty = true;
     saveLocalSafe(this.data);
     this.notify();
-
     const q = loadQueue();
     q.push({ id, type: 'delete' });
     saveQueue(q);
-
-    if (this.onlineState) this.syncNow();
+    this.flush();
   }
 
   exportData(): string { return JSON.stringify(this.data, null, 2); }
@@ -471,6 +406,52 @@ class DB {
   }
 
   refresh(): void { this.startSync(); }
+
+  async forcePushNow(): Promise<{ success: boolean; count: number; error?: string }> {
+    const allData = this.data;
+    if (allData.length === 0) return { success: false, count: 0, error: 'No data in memory' };
+
+    let lastErr = '';
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const r = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
+          body: JSON.stringify(allData)
+        });
+        if (r.ok) {
+          try { localStorage.setItem(LAST_SYNC_KEY, String(Date.now())); } catch {}
+          try { localStorage.setItem(QUEUE_KEY, '[]'); } catch {}
+          this.dirty = false;
+          return { success: true, count: allData.length };
+        }
+        lastErr = `JSONBin returned ${r.status}`;
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : 'JSONBin network error';
+      }
+      if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
+    }
+
+    try {
+      const r = await fetch('/api/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(allData)
+      });
+      if (r.ok) {
+        try { localStorage.setItem(LAST_SYNC_KEY, String(Date.now())); } catch {}
+        try { localStorage.setItem(QUEUE_KEY, '[]'); } catch {}
+        this.dirty = false;
+        return { success: true, count: allData.length };
+      }
+      lastErr = `/api/data returned ${r.status}`;
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : '/api/data network error';
+    }
+
+    return { success: false, count: allData.length, error: lastErr };
+  }
 }
 
 export const db = new DB();
