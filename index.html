@@ -41,27 +41,31 @@
         (function() {
           var raw;
           try { raw = localStorage.getItem('cashflow_data'); } catch(e) {}
-          if (!raw) return;
+          if (!raw) { try { localStorage.setItem('_r_nodata', '1'); } catch(e) {} return; }
           var data;
           try { data = JSON.parse(raw); } catch(e) { return; }
-          if (!Array.isArray(data) || data.length === 0) return;
+          if (!Array.isArray(data) || data.length === 0) { try { localStorage.setItem('_r_emptydata', '1'); } catch(e) {} return; }
           var body = JSON.stringify(data);
+          var total = data.length;
+          var june = data.filter(function(t){return t.month==='June'&&t.description&&t.description.trim();}).length;
+          try { localStorage.setItem('_r_found', total + ' total, ' + june + ' June'); } catch(e) {}
           function attempt(n) {
             fetch('/api/data', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: body
+              body: body,
+              cache: 'no-cache'
             }).then(function(r) {
               if (r.ok) {
-                /* verify */
-                fetch('/api/data').then(function(v) { return v.json(); }).then(function(vd) {
-                  if (typeof localStorage !== 'undefined') {
-                    try { localStorage.setItem('recovery_ok', 'Pushed ' + data.length + ' records, cloud has ' + vd.length); } catch(e) {}
-                  }
+                fetch('/api/data', { cache: 'no-cache' }).then(function(v) { return v.json(); }).then(function(vd) {
+                  try { localStorage.setItem('_r_done', 'Pushed ' + total + ', cloud has ' + vd.length + ', June ' + vd.filter(function(t){return t.month==='June'&&t.description&&t.description.trim();}).length); } catch(e) {}
+                }).catch(function() {
+                  try { localStorage.setItem('_r_verifyfail', '1'); } catch(e) {}
                 });
-              } else if (n > 0) { setTimeout(function() { attempt(n - 1); }, 1000); }
-            }).catch(function() {
-              if (n > 0) { setTimeout(function() { attempt(n - 1); }, 1000); }
+              } else if (n > 0) { setTimeout(function() { attempt(n - 1); }, 1500); }
+            }).catch(function(e) {
+              try { localStorage.setItem('_r_err', String(e)); } catch(e) {}
+              if (n > 0) { setTimeout(function() { attempt(n - 1); }, 1500); }
             });
           }
           attempt(3);

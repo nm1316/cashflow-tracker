@@ -2,12 +2,12 @@
   "name": "My Cashflow",
   "short_name": "Cashflow",
   "description": "Personal cashflow and expense tracker — works offline, syncs across devices",
-  "start_url": "/",
+  "start_url": "/?v=29",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#8B5CF6",
   "orientation": "portrait-primary",
-  "version": "5",
+  "version": "29",
   "icons": [
     {
       "src": "/favicon.svg",
