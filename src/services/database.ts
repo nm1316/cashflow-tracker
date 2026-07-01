@@ -62,6 +62,17 @@ async function pushCloud(data: Transaction[]): Promise<boolean> {
       return true;
     }
   } catch {}
+  try {
+    const r = await fetch('/api/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (r.ok) {
+      try { localStorage.setItem(LAST_SYNC_KEY, String(Date.now())); } catch {}
+      return true;
+    }
+  } catch {}
   return false;
 }
 
