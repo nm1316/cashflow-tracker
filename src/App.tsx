@@ -376,6 +376,15 @@ export default function App({ onLogout }: { onLogout: () => void }) {
     setEmergencySyncing(false);
     if (result.success) {
       setToast({ message: `✅ Force sync complete! ${result.count} transactions pushed to cloud.`, type: 'success' });
+    } else if (result.downloadData) {
+      const blob = new Blob([result.downloadData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `cashflow-backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setToast({ message: `☁️ Cloud unavailable. ${result.count} transactions downloaded as file — share it to recover data.`, type: 'success' });
     } else {
       setToast({ message: `❌ Force sync failed: ${result.error || 'Unknown error'}`, type: 'error' });
     }

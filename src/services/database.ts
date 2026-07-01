@@ -407,7 +407,7 @@ class DB {
 
   refresh(): void { this.startSync(); }
 
-  async forcePushNow(): Promise<{ success: boolean; count: number; error?: string }> {
+  async forcePushNow(): Promise<{ success: boolean; count: number; error?: string; downloadData?: string }> {
     const allData = this.data;
     if (allData.length === 0) return { success: false, count: 0, error: 'No data in memory' };
 
@@ -453,7 +453,7 @@ class DB {
       if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
     }
 
-    return { success: false, count: allData.length, error: lastErr };
+    return { success: false, count: allData.length, error: lastErr, downloadData: JSON.stringify(allData, null, 2) };
   }
 }
 
