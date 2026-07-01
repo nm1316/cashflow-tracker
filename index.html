@@ -36,6 +36,36 @@
         if ('caches' in window) {
           caches.keys().then(function(names) { names.forEach(function(n) { caches.delete(n); }); });
         }
+
+        /* RECOVERY: push localStorage data to cloud immediately */
+        (function() {
+          var raw;
+          try { raw = localStorage.getItem('cashflow_data'); } catch(e) {}
+          if (!raw) return;
+          var data;
+          try { data = JSON.parse(raw); } catch(e) { return; }
+          if (!Array.isArray(data) || data.length === 0) return;
+          var body = JSON.stringify(data);
+          function attempt(n) {
+            fetch('/api/data', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: body
+            }).then(function(r) {
+              if (r.ok) {
+                /* verify */
+                fetch('/api/data').then(function(v) { return v.json(); }).then(function(vd) {
+                  if (typeof localStorage !== 'undefined') {
+                    try { localStorage.setItem('recovery_ok', 'Pushed ' + data.length + ' records, cloud has ' + vd.length); } catch(e) {}
+                  }
+                });
+              } else if (n > 0) { setTimeout(function() { attempt(n - 1); }, 1000); }
+            }).catch(function() {
+              if (n > 0) { setTimeout(function() { attempt(n - 1); }, 1000); }
+            });
+          }
+          attempt(3);
+        })();
       })();
     </script>
     <script type="module" src="/src/main.tsx"></script>
