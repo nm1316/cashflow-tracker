@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sync Recovery</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;justify-content:center;align-items:center;min-height:100dvh;padding:16px}
+.box{background:#1e293b;border-radius:16px;padding:24px;width:100%;max-width:420px;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+h1{font-size:18px;margin-bottom:16px}
+pre{background:#0f172a;padding:12px;border-radius:8px;font-size:12px;overflow:auto;max-height:200px;margin:12px 0;white-space:pre-wrap;word-break:break-all}
+.step{display:flex;gap:12px;align-items:flex-start;margin:12px 0;padding:12px;border-radius:8px;background:#0f172a;font-size:13px;line-height:1.5}
+.step .num{background:#334155;color:#94a3b8;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.btn{width:100%;padding:14px;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;background:#2563eb;color:white;margin-top:12px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.red{background:#dc2626}
+.btn.green{background:#16a34a}
+.status{margin-top:12px;padding:12px;border-radius:8px;font-size:13px;display:none}
+.status.ok{display:block;background:#052e16;color:#86efac;border:1px solid #166534}
+.status.err{display:block;background:#450a0a;color:#fca5a5;border:1px solid #991b1b}
+.status.info{display:block;background:#1e1b0a;color:#fde68a;border:1px solid #854d0e}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="box" id="app">
+  <h1>🔄 Sync Recovery</h1>
+  <div id="step1" class="step">
+    <div class="num">1</div>
+    <div>Reading data from this device...</div>
+  </div>
+  <div id="result1"></div>
+  <div id="step2" class="step hidden">
+    <div class="num">2</div>
+    <div>Pushing to cloud server...</div>
+  </div>
+  <div id="result2"></div>
+  <div id="step3" class="step hidden">
+    <div class="num">3</div>
+    <div>Verifying cloud storage...</div>
+  </div>
+  <div id="result3"></div>
+  <div id="actions" class="hidden">
+    <button id="pushBtn" class="btn red">☁️ PUSH TO CLOUD NOW</button>
+    <button id="copyBtn" class="btn">📋 COPY TO CLIPBOARD</button>
+    <button id="downloadBtn" class="btn">💾 DOWNLOAD JSON</button>
+  </div>
+  <div id="final"></div>
+</div>
+<script>
+(function(){
+  const el = id => document.getElementById(id);
+  const show = id => el(id).classList.remove('hidden');
+  const hide = id => el(id).classList.add('hidden');
+  const status = (id, type, msg) => { el(id).className = 'status ' + type; el(id).textContent = msg; };
+
+  let allData = [];
+  let juneCount = 0;
+
+  // Step 1: Read localStorage
+  try {
+    const raw = localStorage.getItem('cashflow_data');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        allData = parsed;
+        juneCount = parsed.filter(t => t.month === 'June' && t.description && t.description.trim()).length;
+        const totalDesc = parsed.filter(t => t.description && t.description.trim()).length;
+        el('step1').querySelector('div:last-child').textContent =
+          `✅ Found ${parsed.length} records (${totalDesc} with descriptions, ${juneCount} real June transactions)`;
+        show('actions');
+        show('step2');
+        el('pushBtn').textContent = `☁️ PUSH ${parsed.length} RECORDS TO CLOUD`;
+      } else {
+        el('step1').querySelector('div:last-child').textContent = '❌ localStorage data is empty or invalid';
+      }
+    } else {
+      el('step1').querySelector('div:last-child').textContent = '❌ No cashflow data found in localStorage. Are you logged in?';
+    }
+  } catch (e) {
+    el('step1').querySelector('div:last-child').textContent = '❌ Error reading localStorage: ' + e.message;
+  }
+
+  async function pushToCloud() {
+    hide('actions');
+    el('pushBtn').disabled = true;
+    el('step2').querySelector('div:last-child').textContent = 'Pushing to /api/data...';
+    status('result2', 'info', 'Attempting to push...');
+
+    let lastErr = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const r = await fetch('/api/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(allData)
+        });
+        if (r.ok) {
+          status('result2', 'ok', `✅ Push succeeded (attempt ${attempt + 1})`);
+          el('step2').querySelector('div:last-child').textContent = '✅ Data pushed to cloud!';
+
+          // Step 3: Verify
+          show('step3');
+          el('step3').querySelector('div:last-child').textContent = 'Verifying...';
+          try {
+            const v = await fetch('/api/data');
+            const vd = await v.json();
+            const vJune = vd.filter(t => t.month === 'June' && t.description && t.description.trim()).length;
+            status('result3', 'ok', `✅ Verified: Cloud has ${vd.length} records (${vJune} June transactions)`);
+            el('step3').querySelector('div:last-child').textContent = `✅ Cloud verified! ${vd.length} records stored.`;
+          } catch (e) {
+            status('result3', 'info', 'Push done but verification failed: ' + e.message);
+            el('step3').querySelector('div:last-child').textContent = '⚠️ Push succeeded, but verify failed';
+          }
+
+          el('final').className = 'status ok';
+          el('final').textContent = '🎉 SUCCESS! Refresh your desktop browser — all transactions should appear.';
+          return;
+        }
+        lastErr = `HTTP ${r.status}`;
+      } catch (e) {
+        lastErr = e.message;
+      }
+      if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
+    }
+
+    status('result2', 'err', `❌ All 3 attempts failed: ${lastErr}`);
+    el('step2').querySelector('div:last-child').textContent = '❌ Push failed. Trying clipboard...';
+
+    // Fallback: copy to clipboard
+    try {
+      const json = JSON.stringify(allData, null, 2);
+      await navigator.clipboard.writeText(json);
+      el('final').className = 'status info';
+      el('final').textContent = '📋 Data copied to clipboard. Open Telegram and paste it there, then tell me.';
+    } catch {
+      el('final').className = 'status err';
+      el('final').textContent = '❌ Push failed and clipboard copy also failed. Try the download button below.';
+      show('actions');
+      el('pushBtn').textContent = '🔄 RETRY PUSH';
+      el('pushBtn').disabled = false;
+    }
+  }
+
+  el('pushBtn').addEventListener('click', pushToCloud);
+  el('copyBtn').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(allData, null, 2));
+      el('final').className = 'status ok';
+      el('final').textContent = '📋 Copied to clipboard! Paste in Telegram.';
+    } catch {
+      el('final').className = 'status err';
+      el('final').textContent = '❌ Clipboard failed. Use download instead.';
+    }
+  });
+  el('downloadBtn').addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify(allData, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'cashflow-backup.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    el('final').className = 'status ok';
+    el('final').textContent = '💾 Downloaded as cashflow-backup.json';
+  });
+})();
+</script>
+</body>
+</html>
