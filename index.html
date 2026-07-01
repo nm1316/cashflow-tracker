@@ -23,7 +23,7 @@
     <script>
       (function() {
         var key = 'av';
-        var ver = '28';
+        var ver = '29';
         localStorage.setItem(key, ver);
         localStorage.setItem('preferred_month', 'May');
         localStorage.removeItem('cashflow_cache');
@@ -35,6 +35,12 @@
         }
         if ('caches' in window) {
           caches.keys().then(function(names) { names.forEach(function(n) { caches.delete(n); }); });
+        }
+
+        /* Force fresh load: if not yet on /?r=29, redirect to break iOS PWA cache */
+        if (location.search !== '?r=29' && location.pathname === '/') {
+          location.replace('/?r=29');
+          return;
         }
 
         /* RECOVERY: push localStorage data to cloud immediately */
