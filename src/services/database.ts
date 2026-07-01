@@ -258,27 +258,20 @@ class DB {
 
   async init(): Promise<void> {
     this.data = loadLocal();
-    let loaded = this.data.length > 0;
 
     const q = loadQueue();
     const pendingDeletes = new Set(q.filter(op => op.type === 'delete').map(op => op.id));
 
-    if (!loaded) {
-      const cloud = await pullCloud();
-      if (cloud && cloud.length > 0) {
-        this.data = normalize(cloud);
-        loaded = true;
-      }
-    }
-
-    if (!loaded) {
-      this.data = normalize(getInitialData());
-    } else if (pendingDeletes.size > 0) {
-      const cloud = await pullCloud();
-      if (cloud && cloud.length > 0) {
-        const cData = normalize(cloud);
+    const cloud = await pullCloud();
+    if (cloud && cloud.length > 0) {
+      const cData = normalize(cloud);
+      if (this.data.length > 0) {
         this.data = mergeData(this.data, cData, pendingDeletes);
+      } else {
+        this.data = cData;
       }
+    } else if (this.data.length === 0) {
+      this.data = normalize(getInitialData());
     }
 
     for (const op of q) {
