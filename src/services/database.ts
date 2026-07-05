@@ -193,7 +193,7 @@ class DB {
   private async pushToCloud(): Promise<void> {
     this.notifyS({ syncing: true, lastSync: null, connected: this.onlineState, error: null });
     try {
-      const payload = JSON.stringify({ data: this.data });
+      const payload = JSON.stringify(this.data);
       const res = await fetch('/api/data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
