@@ -1,3 +1,6 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 const GITHUB_TOKEN = process.env.GH_TOKEN;
 const OWNER = 'nm1316';
 const REPO = 'cashflow-tracker';
@@ -14,19 +17,22 @@ async function gitRead() {
   });
   if (!r.ok) throw new Error(`GitHub read: ${r.status}`);
   const j = await r.json();
-  const content = Buffer.from(j.content, 'base64').toString('utf8');
+  let content = Buffer.from(j.content, 'base64').toString('utf8');
+  if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
+  content = content.trim();
   const data = JSON.parse(content);
   return { data: Array.isArray(data) ? data : (data.data || data.record || []), sha: j.sha };
 }
 
 async function gitWrite(data, sha) {
   const url = `${API_BASE}/repos/${OWNER}/${REPO}/contents/${FILE_PATH}`;
-  const body = JSON.stringify({
+  const payload = {
     message: 'chore: auto-save from app',
     content: Buffer.from(JSON.stringify(data)).toString('base64'),
-    sha,
     branch: BRANCH,
-  });
+  };
+  if (sha) payload.sha = sha;
+  const body = JSON.stringify(payload);
   const r = await fetch(url, {
     method: 'PUT',
     headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
@@ -34,6 +40,37 @@ async function gitWrite(data, sha) {
   });
   if (!r.ok) throw new Error(`GitHub write: ${r.status}`);
   return r.json();
+}
+
+function seedData() {
+  try {
+    const raw = readFileSync(join(process.cwd(), 'public', 'data.json'), 'utf8');
+    return JSON.parse(raw);
+  } catch { return []; }
+}
+
+async function ensureGitHubSeeded() {
+  let result;
+  try {
+    result = await gitRead();
+  } catch (e) {
+    if (e.message.includes('404')) {
+      const seed = seedData();
+      if (seed.length > 0) {
+        const dummySha = await gitWrite(seed, null);
+        return { data: seed, sha: dummySha?.content?.sha };
+      }
+    }
+    throw e;
+  }
+  if (result.data.length === 0) {
+    const seed = seedData();
+    if (seed.length > 0) {
+      await gitWrite(seed, result.sha);
+      return { data: seed, sha: result.sha };
+    }
+  }
+  return result;
 }
 
 export default async function handler(req, res) {
@@ -48,7 +85,7 @@ export default async function handler(req, res) {
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
       if (memCache && Array.isArray(memCache) && memCache.length > 0) return res.status(200).json(memCache);
-      const { data } = await gitRead();
+      const { data } = await ensureGitHubSeeded();
       memCache = data;
       return res.status(200).json(data);
     }
@@ -59,7 +96,8 @@ export default async function handler(req, res) {
       try { json = JSON.parse(body); } catch { json = []; }
       const count = Array.isArray(json) ? json.length : 0;
       if (Array.isArray(json) && json.length > 0) {
-        const { sha } = await gitRead();
+        let sha;
+        try { sha = (await gitRead()).sha; } catch { sha = null; }
         await gitWrite(json, sha);
         memCache = json;
       }
