@@ -28,17 +28,16 @@
         localStorage.setItem('preferred_month', 'May');
         localStorage.removeItem('cashflow_cache');
 
+        /* Register SW to intercept JSONBin requests and proxy to /api/data */
         if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.getRegistrations().then(function(regs) {
-            regs.forEach(function(r) { r.unregister(); });
-          });
+          navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' });
         }
         if ('caches' in window) {
           caches.keys().then(function(names) { names.forEach(function(n) { caches.delete(n); }); });
         }
 
-        /* Force fresh load: if not yet on /?r=29, redirect to break iOS PWA cache */
-        if (location.search !== '?r=29' && location.pathname === '/') {
+        /* Force fresh load via redirect if not already on cache-busted URL */
+        if (location.pathname === '/' && location.search !== '?r=29') {
           location.replace('/?r=29');
           return;
         }
