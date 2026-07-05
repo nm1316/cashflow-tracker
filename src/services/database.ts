@@ -1,7 +1,5 @@
 import type { Transaction, SyncStatus } from '../types';
-import { march2026Data, january2026Data, february2026Data, april2026Data, may2026Data, june2026Data, july2026Data, august2026Data, september2026Data, october2026Data, november2026Data, december2026Data } from '../data/transactions';
 
-const LOCAL_KEY = 'cashflow_data';
 const CLOSED_MONTHS_KEY = 'cashflow_closed_months';
 const AUTO_ADVANCE_KEY = 'cashflow_auto_advance';
 
@@ -12,24 +10,6 @@ export function convertToDZD(aed: number): number { return Math.round((aed * 60)
 export function formatAED(amount: number): string { return `AED ${Math.abs(amount).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 export function formatEUR(amount: number): string { return `€${Math.abs(amount).toLocaleString('en-EU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 export function formatDZD(amount: number): string { return `${Math.abs(amount).toLocaleString('en-DZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DZD`; }
-
-function getInitialData(): Transaction[] {
-  const d = [...january2026Data, ...february2026Data, ...march2026Data, ...april2026Data, ...may2026Data, ...june2026Data, ...july2026Data, ...august2026Data, ...september2026Data, ...october2026Data, ...november2026Data, ...december2026Data];
-  const now = Date.now();
-  return d.map(t => t._id ? t : { ...t, _id: `tx-${now}-${Math.random().toString(36).slice(2, 6)}` });
-}
-
-function saveLocal(data: Transaction[]): void {
-  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(data)); } catch {}
-}
-
-function loadLocal(): Transaction[] {
-  try {
-    const s = localStorage.getItem(LOCAL_KEY);
-    if (s) { const p = JSON.parse(s); if (Array.isArray(p) && p.length > 0) return p; }
-  } catch {}
-  return [];
-}
 
 async function pullCloud(): Promise<Transaction[] | null> {
   for (const url of ['/api/data', '/data.json']) {
@@ -134,27 +114,35 @@ class DB {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => { this.onlineState = true; this.notifyS({ syncing: false, lastSync: null, connected: true, error: null }); });
       window.addEventListener('offline', () => { this.onlineState = false; this.notifyS({ syncing: false, lastSync: null, connected: false, error: null }); });
+      window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.syncDown(); });
+      window.addEventListener('focus', () => this.syncDown());
     }
   }
 
   async init(): Promise<void> {
-    this.data = loadLocal();
-    const cloud = await pullCloud();
-    if (cloud && cloud.length > 0) {
-      this.data = normalize(cloud);
-    } else if (this.data.length === 0) {
-      this.data = normalize(getInitialData());
-    }
+    this.notifyS({ syncing: true, lastSync: null, connected: this.onlineState, error: null });
+    try {
+      const cloud = await pullCloud();
+      if (cloud && cloud.length > 0) {
+        this.data = normalize(cloud);
+      } else {
+        throw new Error('Cloud returned empty data');
+      }
 
-    const auto = autoAdvanceMonth(this.data);
-    if (auto?.transaction) {
-      this.data = [...this.data, auto.transaction];
-      try { localStorage.setItem(AUTO_ADVANCE_KEY, JSON.stringify({ from: 'May', to: auto.newMonth, net: auto.transaction.amount })); } catch {}
-    }
+      const auto = autoAdvanceMonth(this.data);
+      if (auto?.transaction) {
+        this.data = [...this.data, auto.transaction];
+        try { localStorage.setItem(AUTO_ADVANCE_KEY, JSON.stringify({ from: 'May', to: auto.newMonth, net: auto.transaction.amount })); } catch {}
+        await this.pushToCloud();
+        await this.syncDown();
+        return;
+      }
 
-    saveLocal(this.data);
-    this.notify();
-    this.notifyS({ syncing: false, lastSync: null, connected: this.onlineState, error: null });
+      this.notify();
+      this.notifyS({ syncing: false, lastSync: Date.now(), connected: this.onlineState, error: null });
+    } catch (err) {
+      this.notifyS({ syncing: false, lastSync: null, connected: false, error: `Cloud load failed: ${err instanceof Error ? err.message : 'Unknown'}` });
+    }
   }
 
   closeMonth(month: string, year: number): void {
@@ -213,7 +201,6 @@ class DB {
         const cloud = await res.json();
         if (Array.isArray(cloud) && cloud.length > 0) {
           this.data = normalize(cloud);
-          saveLocal(this.data);
           this.notify();
         }
       }
@@ -223,7 +210,6 @@ class DB {
   async addTransaction(tx: Transaction): Promise<void> {
     const t = normalize([tx])[0];
     this.data = [...this.data, t];
-    saveLocal(this.data);
     this.notify();
     await this.pushToCloud();
     await this.syncDown();
@@ -234,7 +220,6 @@ class DB {
     const i = this.data.findIndex(x => x._id === tx._id);
     if (i >= 0) {
       this.data = this.data.map((x, j) => j === i ? t : x);
-      saveLocal(this.data);
       this.notify();
       await this.pushToCloud();
       await this.syncDown();
@@ -243,7 +228,6 @@ class DB {
 
   async deleteTransaction(id: string): Promise<void> {
     this.data = this.data.filter(x => x._id !== id);
-    saveLocal(this.data);
     this.notify();
     await this.pushToCloud();
     await this.syncDown();
@@ -256,7 +240,6 @@ class DB {
       const p = JSON.parse(json);
       if (Array.isArray(p)) {
         this.data = normalize(p);
-        saveLocal(this.data);
         this.notify();
         await this.pushToCloud();
         await this.syncDown();
