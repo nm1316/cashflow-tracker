@@ -367,78 +367,7 @@ export default function App({ onLogout }: { onLogout: () => void }) {
     return () => { unsub(); unsubSync(); };
   }, []);
   
-  const [emergencySyncing, setEmergencySyncing] = useState(false);
-  const [overwriteSyncing, setOverwriteSyncing] = useState(false);
-  const handleManualSync = () => { db.refresh(); };
-  const handleEmergencySync = async () => {
-    if (emergencySyncing) return;
-    setEmergencySyncing(true);
-    const result = await db.forcePushNow();
-    setEmergencySyncing(false);
-    if (result.success) {
-      setToast({ message: `✅ Force sync complete! ${result.count} transactions pushed to cloud.`, type: 'success' });
-    } else if (result.downloadData) {
-      const blob = new Blob([result.downloadData], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `cashflow-backup-${new Date().toISOString().slice(0,10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setToast({ message: `☁️ Cloud unavailable. ${result.count} transactions downloaded as file — share it to recover data.`, type: 'success' });
-    } else {
-      setToast({ message: `❌ Force sync failed: ${result.error || 'Unknown error'}`, type: 'error' });
-    }
-  };
-  const handleOverwriteCloud = async () => {
-    if (overwriteSyncing) return;
-    setOverwriteSyncing(true);
-    try {
-      const raw = localStorage.getItem('cashflow_data');
-      if (!raw) { setToast({ message: '❌ No data found in localStorage', type: 'error' }); setOverwriteSyncing(false); return; }
-      const data = JSON.parse(raw);
-      const count = Array.isArray(data) ? data.length : 0;
-      if (count === 0) { setToast({ message: '❌ localStorage is empty array', type: 'error' }); setOverwriteSyncing(false); return; }
 
-      // Try POST to /api/data
-      let posted = false;
-      try {
-        const r = await fetch('/api/data', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        });
-        if (r.ok) posted = true;
-      } catch {}
-
-      // If POST worked, verify with GET
-      let verified = 0;
-      if (posted) {
-        try {
-          const r = await fetch('/api/data');
-          const v = await r.json();
-          if (Array.isArray(v)) verified = v.filter((t: any) => t.month === 'June' && t.description && t.description.trim()).length;
-        } catch {}
-      }
-
-      // Also copy to clipboard as fallback
-      try {
-        const jsonStr = JSON.stringify(data, null, 2);
-        await navigator.clipboard.writeText(jsonStr);
-      } catch {}
-
-      if (verified >= count) {
-        setToast({ message: `✅ ${count} transactions pushed to cloud (verified ${verified} June)! Refresh desktop.`, type: 'success' });
-      } else if (posted) {
-        setToast({ message: `✅ POST succeeded (${count} txns). Cloud shows ${verified} June — data syncs within seconds.`, type: 'success' });
-      } else {
-        setToast({ message: `✅ ${count} transactions COPIED TO CLIPBOARD. Open Telegram and paste to send to me!`, type: 'success' });
-      }
-    } catch (e: any) {
-      setToast({ message: `❌ Error: ${e.message}`, type: 'error' });
-    }
-    setOverwriteSyncing(false);
-  };
 
   const filledTransactions = useMemo(() => 
     allTransactions.filter(t => t.description && t.description.trim().length > 0),
@@ -526,12 +455,8 @@ export default function App({ onLogout }: { onLogout: () => void }) {
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
               )}
             </button>
-            <button onClick={handleEmergencySync} disabled={emergencySyncing} className="w-9 h-9 flex items-center justify-center text-red-500 hover:text-red-700 rounded-full hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-40" title="Emergency Force Sync">
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86l-8.26 14.28A1.73 1.73 0 0 0 3.48 21h17.04a1.73 1.73 0 0 0 1.47-2.86L13.71 3.86a1.73 1.73 0 0 0-3.42 0z"/></svg>
-            </button>
-            <button onClick={handleOverwriteCloud} disabled={overwriteSyncing} className="w-10 h-10 flex items-center justify-center text-white bg-red-700 hover:bg-red-800 rounded-full disabled:opacity-40 shadow-md" title="Overwrite Cloud with Device Data">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            </button>
+
+
             <button onClick={onLogout} className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-red-500 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             </button>
@@ -576,18 +501,7 @@ export default function App({ onLogout }: { onLogout: () => void }) {
               )}
               {syncStatus === 'syncing' ? 'Syncing...' : syncStatus === 'cloud' ? 'Synced' : 'Offline'}
             </div>
-            <button onClick={handleManualSync} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-500 px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-              Sync
-            </button>
-            <button onClick={handleEmergencySync} disabled={emergencySyncing} className="flex items-center gap-1.5 text-xs text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400 px-3 py-1.5 rounded-lg font-semibold shadow-sm">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86l-8.26 14.28A1.73 1.73 0 0 0 3.48 21h17.04a1.73 1.73 0 0 0 1.47-2.86L13.71 3.86a1.73 1.73 0 0 0-3.42 0z"/></svg>
-              {emergencySyncing ? 'Pushing...' : 'Force Sync'}
-            </button>
-            <button onClick={handleOverwriteCloud} disabled={overwriteSyncing} className="flex items-center gap-1.5 text-xs text-white bg-red-700 hover:bg-red-800 disabled:bg-red-400 px-4 py-2 rounded-lg font-bold shadow-md border-2 border-red-400">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              {overwriteSyncing ? 'Uploading...' : 'OVERWRITE CLOUD'}
-            </button>
+
             <button onClick={() => { const data = db.exportData(); const blob = new Blob([data], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `cashflow-backup-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-500 px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               Export
@@ -627,16 +541,7 @@ export default function App({ onLogout }: { onLogout: () => void }) {
         </div>
       </div>
 
-      {/* Push Banner */}
-      <div className="bg-red-600/10 dark:bg-red-900/20 border-b border-red-300 dark:border-red-800 px-3 sm:px-6 py-2">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-2">
-          <span className="text-xs font-bold text-red-700 dark:text-red-400 truncate">📤 {monthTransactions.length} June txns on this device</span>
-          <button onClick={handleOverwriteCloud} disabled={overwriteSyncing} className="flex items-center gap-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400 px-4 py-1.5 rounded-lg shadow-sm shrink-0">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            {overwriteSyncing ? 'Pushing...' : '☁️ PUSH TO CLOUD'}
-          </button>
-        </div>
-      </div>
+
 
       {/* Dashboard */}
       <Dashboard transactions={allTransactions} selectedMonth={selectedMonth} year={selectedYear} />

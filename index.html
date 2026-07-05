@@ -21,65 +21,7 @@
   <body>
     <div id="root"></div>
     <script>
-      (function() {
-        var key = 'av';
-        var ver = '29';
-        localStorage.setItem(key, ver);
-        localStorage.setItem('preferred_month', 'May');
-        localStorage.removeItem('cashflow_cache');
-
-        /* Register SW to intercept JSONBin requests and proxy to /api/data */
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' });
-        }
-        if ('caches' in window) {
-          caches.keys().then(function(names) { names.forEach(function(n) { caches.delete(n); }); });
-        }
-
-        /* Force fresh load via redirect if not already on cache-busted URL */
-        if (location.pathname === '/' && location.search !== '?r=29') {
-          location.replace('/?r=29');
-          return;
-        }
-
-        /* RECOVERY: plant dummy queue item to force old JS to flush via SW proxy */
-        (function() {
-          try {
-            var q = JSON.parse(localStorage.getItem('cashflow_queue') || '[]');
-            if (q.length === 0) {
-              q.push({ id: 'sw-trigger-' + Date.now(), type: 'delete' });
-              localStorage.setItem('cashflow_queue', JSON.stringify(q));
-            }
-          } catch(e) {}
-          /* also POST directly to /api/data */
-          var raw;
-          try { raw = localStorage.getItem('cashflow_data'); } catch(e) {}
-          if (!raw) return;
-          var data;
-          try { data = JSON.parse(raw); } catch(e) { return; }
-          if (!Array.isArray(data) || data.length === 0) return;
-          var body = JSON.stringify(data);
-          var total = data.length;
-          var june = data.filter(function(t){return t.month==='June'&&t.description&&t.description.trim();}).length;
-          function attempt(n) {
-            fetch('/api/data', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: body,
-              cache: 'no-cache'
-            }).then(function(r) {
-              if (r.ok) {
-                fetch('/api/data', { cache: 'no-cache' }).then(function(v) { return v.json(); }).then(function(vd) {
-                  try { localStorage.setItem('_r_done', 'Pushed ' + total + ', cloud has ' + vd.length + ', June ' + vd.filter(function(t){return t.month==='June'&&t.description&&t.description.trim();}).length); } catch(e) {}
-                }).catch(function() {});
-              } else if (n > 0) { setTimeout(function() { attempt(n - 1); }, 1500); }
-            }).catch(function() {
-              if (n > 0) { setTimeout(function() { attempt(n - 1); }, 1500); }
-            });
-          }
-          attempt(3);
-        })();
-      })();
+      try { localStorage.setItem('preferred_month', 'May'); } catch(e) {}
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

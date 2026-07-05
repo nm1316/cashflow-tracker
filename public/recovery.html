@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Emergency Data Recovery</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f172a;color:#e2e8f0;font-family:system-ui,-apple-system,sans-serif;padding:20px;min-height:100vh}
+h1{font-size:18px;font-weight:800;color:#f87171;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px}
+p{font-size:12px;color:#94a3b8;margin-bottom:16px}
+textarea{width:100%;height:65vh;background:#1e293b;color:#e2e8f0;border:2px solid #334155;border-radius:8px;padding:16px;font-family:monospace;font-size:13px;resize:vertical;white-space:pre;overflow-wrap:normal;overflow-x:auto}
+textarea:focus{outline:none;border-color:#f87171}
+.stats{display:flex;gap:16px;font-size:12px;color:#94a3b8;margin-bottom:8px;flex-wrap:wrap}
+.stats span{background:#1e293b;padding:4px 10px;border-radius:4px}
+.btn-row{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.btn{width:100%;padding:16px;font-size:16px;font-weight:800;border:none;border-radius:8px;cursor:pointer;text-transform:uppercase;letter-spacing:2px;transition:all 0.15s}
+.btn-ready{background:#dc2626;color:white}
+.btn-ready:hover{background:#b91c1c}
+.btn-ready:active{transform:scale(0.98)}
+.btn-busy{background:#475569;color:#94a3b8;cursor:not-allowed}
+.btn-done{background:#16a34a;color:white;cursor:default}
+.btn-load{background:#2563eb;color:white;padding:12px;font-size:13px}
+.btn-load:hover{background:#1d4ed8}
+#status{margin-top:12px;padding:12px 16px;border-radius:6px;font-size:13px;font-weight:600;display:none}
+#status.success{display:block;background:#166534;color:#86efac;border:1px solid #16a34a}
+#status.error{display:block;background:#7f1d1d;color:#fca5a5;border:1px solid #dc2626}
+#status.info{display:block;background:#1e3a5f;color:#93c5fd;border:1px solid #2563eb}
+</style>
+</head>
+<body>
+<h1>Emergency Data Recovery</h1>
+<p>Paste the raw JSON from your phone's PWA below, then click FORCE OVERWRITE to slam it into the cloud.</p>
+<div class="stats">
+  <span id="charCount">0 chars</span>
+  <span id="lineCount">0 lines</span>
+  <span id="jsonStatus">not JSON</span>
+</div>
+<textarea id="payload" placeholder="Paste the raw JSON from your phone here..."></textarea>
+<div class="btn-row">
+  <button id="loadBtn" class="btn btn-load" onclick="loadFromStorage()">LOAD FROM THIS BROWSER</button>
+  <button id="goBtn" class="btn btn-ready" onclick="forceOverwrite()">FORCE OVERWRITE DATABASE</button>
+</div>
+<div id="status"></div>
+
+<script>
+const ta = document.getElementById('payload');
+const goBtn = document.getElementById('goBtn');
+const status = document.getElementById('status');
+const charCount = document.getElementById('charCount');
+const lineCount = document.getElementById('lineCount');
+const jsonStatus = document.getElementById('jsonStatus');
+
+ta.addEventListener('input', updateStats);
+function updateStats() {
+  const t = ta.value;
+  charCount.textContent = t.length + ' chars';
+  lineCount.textContent = (t.match(/\n/g)||[]).length + ' lines';
+  try { JSON.parse(t); jsonStatus.textContent = 'valid JSON'; jsonStatus.style.color = '#86efac'; } catch(e) { jsonStatus.textContent = 'invalid: ' + e.message.slice(0,40); jsonStatus.style.color = '#fca5a5'; }
+}
+
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem('cashflow_data');
+    if (!raw) { showStatus('No cashflow_data found in this browser localStorage.', 'error'); return; }
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data) || data.length === 0) { showStatus('localStorage data is empty.', 'error'); return; }
+    ta.value = JSON.stringify(data, null, 2);
+    updateStats();
+    showStatus('Loaded ' + data.length + ' transactions from this browser. Verify below then FORCE OVERWRITE.', 'info');
+  } catch(e) {
+    showStatus('Error reading localStorage: ' + e.message, 'error');
+  }
+}
+
+async function forceOverwrite() {
+  const t = ta.value.trim();
+  if (!t) { showStatus('Paste some JSON first or tap LOAD FROM THIS BROWSER.', 'error'); return; }
+  let json;
+  try { json = JSON.parse(t); } catch(e) { showStatus('Invalid JSON: ' + e.message, 'error'); return; }
+  if (!Array.isArray(json)) { showStatus('JSON must be an array of transactions.', 'error'); return; }
+
+  goBtn.className = 'btn btn-busy';
+  goBtn.textContent = 'SLAMMING INTO CLOUD...';
+  goBtn.disabled = true;
+  showStatus('');
+
+  try {
+    const r = await fetch('/api/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: t
+    });
+    const result = await r.json();
+    if (r.ok) {
+      showStatus('SUCCESS! ' + json.length + ' transactions written to cloud. Refresh the main app.', 'success');
+      goBtn.className = 'btn btn-done';
+      goBtn.textContent = 'DONE - REFRESH APP';
+    } else {
+      showStatus('Server error: ' + (result.error || r.status), 'error');
+      goBtn.className = 'btn btn-ready';
+      goBtn.textContent = 'FORCE OVERWRITE DATABASE';
+      goBtn.disabled = false;
+    }
+  } catch(e) {
+    showStatus('Network error: ' + e.message, 'error');
+    goBtn.className = 'btn btn-ready';
+    goBtn.textContent = 'FORCE OVERWRITE DATABASE';
+    goBtn.disabled = false;
+  }
+}
+
+function showStatus(msg, type) {
+  status.textContent = msg;
+  status.className = type || '';
+}
+updateStats();
+</script>
+</body>
+</html>
