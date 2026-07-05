@@ -12,7 +12,7 @@ export function formatEUR(amount: number): string { return `€${Math.abs(amount
 export function formatDZD(amount: number): string { return `${Math.abs(amount).toLocaleString('en-DZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DZD`; }
 
 async function pullCloud(): Promise<Transaction[] | null> {
-  for (const url of ['/api/data', '/data.json']) {
+  for (const url of ['/api/data?t=' + Date.now(), '/data.json']) {
     try {
       const r = await fetch(url);
       if (r.ok) {
@@ -182,7 +182,7 @@ class DB {
     this.notifyS({ syncing: true, lastSync: null, connected: this.onlineState, error: null });
     try {
       const payload = JSON.stringify(this.data);
-      const res = await fetch('/api/data', {
+      const res = await fetch('/api/data?t=' + Date.now(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload,
@@ -196,7 +196,7 @@ class DB {
 
   private async syncDown(): Promise<void> {
     try {
-      const res = await fetch('/api/data');
+      const res = await fetch('/api/data?t=' + Date.now());
       if (res.ok) {
         const cloud = await res.json();
         if (Array.isArray(cloud) && cloud.length > 0) {

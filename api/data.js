@@ -22,6 +22,9 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, s-maxage=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       if (memCache && Array.isArray(memCache) && memCache.length > 0) return res.status(200).json(memCache);
       const disk = loadDisk();
       if (disk) return res.status(200).json(disk);
