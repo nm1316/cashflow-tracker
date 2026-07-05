@@ -1,17 +1,39 @@
-import { writeFileSync, readFileSync, existsSync } from 'fs';
-const BIN_ID = process.env.JSONBIN_BIN_ID || '69d223dd856a682189ff28c7';
-const API_KEY = process.env.JSONBIN_API_KEY || '$2a$10$QwwAuP12n..jYPPFfwVAZuEzgLY3mtZLdcE.Pac5OV/U12k8AQFqG';
-const DATA_FILE = '/tmp/cashflow.json';
+const GITHUB_TOKEN = process.env.GH_TOKEN;
+const OWNER = 'nm1316';
+const REPO = 'cashflow-tracker';
+const BRANCH = 'master';
+const FILE_PATH = 'public/data.json';
+const API_BASE = 'https://api.github.com';
 
 let memCache = null;
 
-function loadDisk() {
-  try { if (existsSync(DATA_FILE)) { const d = JSON.parse(readFileSync(DATA_FILE, 'utf8')); if (Array.isArray(d) && d.length > 0) { memCache = d; return d; } } } catch {}
-  return null;
+async function gitRead() {
+  const url = `${API_BASE}/repos/${OWNER}/${REPO}/contents/${FILE_PATH}`;
+  const r = await fetch(url, {
+    headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json' }
+  });
+  if (!r.ok) throw new Error(`GitHub read: ${r.status}`);
+  const j = await r.json();
+  const content = Buffer.from(j.content, 'base64').toString('utf8');
+  const data = JSON.parse(content);
+  return { data: Array.isArray(data) ? data : (data.data || data.record || []), sha: j.sha };
 }
 
-function saveDisk(data) {
-  try { writeFileSync(DATA_FILE, JSON.stringify(data), 'utf8'); memCache = data; } catch {}
+async function gitWrite(data, sha) {
+  const url = `${API_BASE}/repos/${OWNER}/${REPO}/contents/${FILE_PATH}`;
+  const body = JSON.stringify({
+    message: 'chore: auto-save from app',
+    content: Buffer.from(JSON.stringify(data)).toString('base64'),
+    sha,
+    branch: BRANCH,
+  });
+  const r = await fetch(url, {
+    method: 'PUT',
+    headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+    body,
+  });
+  if (!r.ok) throw new Error(`GitHub write: ${r.status}`);
+  return r.json();
 }
 
 export default async function handler(req, res) {
@@ -26,13 +48,9 @@ export default async function handler(req, res) {
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
       if (memCache && Array.isArray(memCache) && memCache.length > 0) return res.status(200).json(memCache);
-      const disk = loadDisk();
-      if (disk) return res.status(200).json(disk);
-      const r = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
-        headers: { 'X-Master-Key': API_KEY }
-      });
-      if (r.ok) { const d = await r.json(); const data = d.record || d; if (Array.isArray(data) && data.length > 0) { saveDisk(data); return res.status(200).json(data); } }
-      return res.status(200).json([]);
+      const { data } = await gitRead();
+      memCache = data;
+      return res.status(200).json(data);
     }
 
     if (req.method === 'POST') {
@@ -40,11 +58,17 @@ export default async function handler(req, res) {
       let json;
       try { json = JSON.parse(body); } catch { json = []; }
       const count = Array.isArray(json) ? json.length : 0;
-      if (Array.isArray(json) && json.length > 0) saveDisk(json);
-      try { await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY }, body }); } catch {}
-      return res.status(200).json({ success: true, count, source: 'ipad' });
+      if (Array.isArray(json) && json.length > 0) {
+        const { sha } = await gitRead();
+        await gitWrite(json, sha);
+        memCache = json;
+      }
+      return res.status(200).json({ success: true, count, source: 'github' });
     }
 
     return res.status(200).json({ error: 'Method not allowed' });
-  } catch (e) { console.error('API error:', e); return res.status(200).json({ error: String(e) }); }
+  } catch (e) {
+    console.error('API error:', e);
+    return res.status(200).json({ error: String(e) });
+  }
 }
