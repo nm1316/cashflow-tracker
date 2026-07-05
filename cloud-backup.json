@@ -3110,326 +3110,6 @@
     "year": 2026
   },
   {
-    "_id": "jul-empty-01",
-    "date": "2026-07-01",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "tx-ob-jul-1782903209348",
-    "date": "2026-07-01",
-    "description": "OPENING BALANCE",
-    "amount": 395.62,
-    "type": "Income",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-02",
-    "date": "2026-07-02",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-03",
-    "date": "2026-07-03",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-04",
-    "date": "2026-07-04",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-05",
-    "date": "2026-07-05",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-06",
-    "date": "2026-07-06",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-07",
-    "date": "2026-07-07",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-08",
-    "date": "2026-07-08",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-09",
-    "date": "2026-07-09",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-10",
-    "date": "2026-07-10",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-11",
-    "date": "2026-07-11",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-12",
-    "date": "2026-07-12",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-13",
-    "date": "2026-07-13",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-14",
-    "date": "2026-07-14",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-15",
-    "date": "2026-07-15",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-16",
-    "date": "2026-07-16",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-17",
-    "date": "2026-07-17",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-18",
-    "date": "2026-07-18",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-19",
-    "date": "2026-07-19",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-20",
-    "date": "2026-07-20",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-21",
-    "date": "2026-07-21",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-22",
-    "date": "2026-07-22",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-23",
-    "date": "2026-07-23",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-24",
-    "date": "2026-07-24",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-25",
-    "date": "2026-07-25",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-26",
-    "date": "2026-07-26",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-27",
-    "date": "2026-07-27",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-28",
-    "date": "2026-07-28",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-29",
-    "date": "2026-07-29",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-30",
-    "date": "2026-07-30",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
-    "_id": "jul-empty-31",
-    "date": "2026-07-31",
-    "description": "",
-    "amount": 0,
-    "type": "Expense",
-    "paymentMethod": "Card",
-    "month": "July",
-    "year": 2026
-  },
-  {
     "_id": "aug-empty-01",
     "date": "2026-08-01",
     "description": "",
@@ -4960,7 +4640,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179500-1zp4",
+    "_id": "tx-1783233973886-goq5",
     "date": "2026-06-01",
     "description": "Balance from May",
     "amount": 4305,
@@ -4970,7 +4650,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179501-hz9l",
+    "_id": "tx-1783233973887-xc3x",
     "date": "2026-06-01",
     "description": "Balance mashreq",
     "amount": 10.75,
@@ -4980,7 +4660,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179502-7pde",
+    "_id": "tx-1783233973888-lm07",
     "date": "2026-06-01",
     "description": "Bread",
     "amount": -2.5,
@@ -4990,7 +4670,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179503-8vux",
+    "_id": "tx-1783233973889-e3ao",
     "date": "2026-06-02",
     "description": "Sandwich Ahl sham",
     "amount": -17,
@@ -5000,7 +4680,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179504-o30u",
+    "_id": "tx-1783233973890-mykf",
     "date": "2026-06-03",
     "description": "Grocery bread",
     "amount": -3,
@@ -5010,7 +4690,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179505-feln",
+    "_id": "tx-1783233973891-xfre",
     "date": "2026-06-03",
     "description": "Ahl sahm sandwich shawarma",
     "amount": -16,
@@ -5020,7 +4700,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179506-i179",
+    "_id": "tx-1783233973892-ldzl",
     "date": "2026-06-04",
     "description": "Rent partition + gas",
     "amount": -1215,
@@ -5030,7 +4710,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179507-yx09",
+    "_id": "tx-1783233973893-v7bw",
     "date": "2026-06-04",
     "description": "Fees MOFA_egalisation",
     "amount": -4.5,
@@ -5040,7 +4720,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179508-kmxz",
+    "_id": "tx-1783233973894-f9mf",
     "date": "2026-06-05",
     "description": "Refund Rafik_MOFA شهادة ميلاد يوسف + old amount",
     "amount": -300.5,
@@ -5050,7 +4730,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179509-4s20",
+    "_id": "tx-1783233973895-mrgp",
     "date": "2026-06-05",
     "description": "Grocery biscuit",
     "amount": -1,
@@ -5060,7 +4740,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179510-jrxp",
+    "_id": "tx-1783233973896-j3qy",
     "date": "2026-06-05",
     "description": "Grocery",
     "amount": -2,
@@ -5070,7 +4750,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179511-evky",
+    "_id": "tx-1783233973897-wnn1",
     "date": "2026-06-05",
     "description": "Ecart",
     "amount": -3.25,
@@ -5080,7 +4760,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179512-80ec",
+    "_id": "tx-1783233973898-7g52",
     "date": "2026-06-06",
     "description": "Fruit",
     "amount": -10,
@@ -5090,7 +4770,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179513-tobb",
+    "_id": "tx-1783233973899-jwlz",
     "date": "2026-06-06",
     "description": "Grocery",
     "amount": -6.5,
@@ -5100,7 +4780,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179514-1jvn",
+    "_id": "tx-1783233973900-ax53",
     "date": "2026-06-06",
     "description": "Biscuit",
     "amount": -1,
@@ -5110,7 +4790,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179515-zi5r",
+    "_id": "tx-1783233973901-sciz",
     "date": "2026-06-06",
     "description": "Bread Irani/pakistani",
     "amount": -2.5,
@@ -5120,7 +4800,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179516-1h90",
+    "_id": "tx-1783233973902-gw02",
     "date": "2026-06-07",
     "description": "Ahl sham briyani + Grocery",
     "amount": -29,
@@ -5130,7 +4810,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179517-te6d",
+    "_id": "tx-1783233973903-w712",
     "date": "2026-06-08",
     "description": "Pizza papa John",
     "amount": -27.25,
@@ -5140,7 +4820,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179518-lh8b",
+    "_id": "tx-1783233973904-h6lh",
     "date": "2026-06-09",
     "description": "Grocery",
     "amount": -10,
@@ -5150,7 +4830,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179519-lwz2",
+    "_id": "tx-1783233973905-zp2l",
     "date": "2026-06-10",
     "description": "Ahl sham restaurant Sandwich",
     "amount": -18,
@@ -5160,7 +4840,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179520-eahe",
+    "_id": "tx-1783233973906-ba75",
     "date": "2026-06-10",
     "description": "Fruit + baqala",
     "amount": -16,
@@ -5170,7 +4850,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179521-wmza",
+    "_id": "tx-1783233973907-myn2",
     "date": "2026-06-12",
     "description": "Baqala",
     "amount": -4.5,
@@ -5180,7 +4860,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179522-su63",
+    "_id": "tx-1783233973908-9c1p",
     "date": "2026-06-12",
     "description": "Ahl sham sahwarma",
     "amount": -16,
@@ -5190,7 +4870,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179523-xb55",
+    "_id": "tx-1783233973909-cy7n",
     "date": "2026-06-12",
     "description": "Grocery Baqla",
     "amount": -10,
@@ -5200,7 +4880,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179524-idip",
+    "_id": "tx-1783233973910-49i0",
     "date": "2026-06-13",
     "description": "Tabby payment last for iPhone 13",
     "amount": -337.5,
@@ -5210,7 +4890,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179525-df3f",
+    "_id": "tx-1783233973911-3cyq",
     "date": "2026-06-13",
     "description": "Coiffeur",
     "amount": -35,
@@ -5220,7 +4900,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179526-1750",
+    "_id": "tx-1783233973912-nyny",
     "date": "2026-06-13",
     "description": "Baqala",
     "amount": -18,
@@ -5230,7 +4910,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179527-xolg",
+    "_id": "tx-1783233973913-mg6g",
     "date": "2026-06-14",
     "description": "Layali sham Sandwich shawarma",
     "amount": -18,
@@ -5240,7 +4920,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179528-hbas",
+    "_id": "tx-1783233973914-wh7s",
     "date": "2026-06-15",
     "description": "Grocery + fruit",
     "amount": -13.75,
@@ -5250,7 +4930,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179529-a4pt",
+    "_id": "tx-1783233973915-eszu",
     "date": "2026-06-15",
     "description": "Al Madina hypermarket",
     "amount": -66.38,
@@ -5260,7 +4940,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179530-utis",
+    "_id": "tx-1783233973916-lw2i",
     "date": "2026-06-17",
     "description": "Grocery",
     "amount": -10.5,
@@ -5270,7 +4950,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179531-5fm2",
+    "_id": "tx-1783233973917-awni",
     "date": "2026-06-18",
     "description": "Ecart",
     "amount": -12,
@@ -5280,7 +4960,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179532-rini",
+    "_id": "tx-1783233973918-bhw3",
     "date": "2026-06-18",
     "description": "Grocery",
     "amount": -4.5,
@@ -5290,7 +4970,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179533-3n0f",
+    "_id": "tx-1783233973919-v6fs",
     "date": "2026-06-19",
     "description": "Grocery",
     "amount": -8.5,
@@ -5300,7 +4980,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179534-4r61",
+    "_id": "tx-1783233973920-lp0p",
     "date": "2026-06-20",
     "description": "Grocery",
     "amount": -11.5,
@@ -5310,7 +4990,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179535-c9ll",
+    "_id": "tx-1783233973921-gvhq",
     "date": "2026-06-21",
     "description": "Layali sham shawarma",
     "amount": -16,
@@ -5320,7 +5000,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179536-zhay",
+    "_id": "tx-1783233973922-c5cz",
     "date": "2026-06-22",
     "description": "Ahl sham",
     "amount": -15,
@@ -5330,7 +5010,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179537-88ym",
+    "_id": "tx-1783233973923-4avc",
     "date": "2026-06-22",
     "description": "Grocery",
     "amount": -4.5,
@@ -5340,7 +5020,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179538-ixby",
+    "_id": "tx-1783233973924-id79",
     "date": "2026-06-23",
     "description": "Grocery",
     "amount": -4,
@@ -5350,7 +5030,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179539-949g",
+    "_id": "tx-1783233973925-1y71",
     "date": "2026-06-23",
     "description": "Grocery",
     "amount": -6.5,
@@ -5360,7 +5040,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179540-x7l6",
+    "_id": "tx-1783233973926-yro6",
     "date": "2026-06-24",
     "description": "Grocery",
     "amount": -4,
@@ -5370,7 +5050,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179541-ze8n",
+    "_id": "tx-1783233973927-l56n",
     "date": "2026-06-24",
     "description": "From Rafik (For rent studio)",
     "amount": 1000,
@@ -5380,7 +5060,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179542-qj6a",
+    "_id": "tx-1783233973928-hj7b",
     "date": "2026-06-24",
     "description": "Rent studio MBZ 17 transfer to Owner account",
     "amount": -2500,
@@ -5390,7 +5070,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179543-0ibi",
+    "_id": "tx-1783233973929-wkuh",
     "date": "2026-06-24",
     "description": "Grocery",
     "amount": -5.5,
@@ -5400,7 +5080,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179544-kohj",
+    "_id": "tx-1783233973930-f5ys",
     "date": "2026-06-24",
     "description": "Du recharge",
     "amount": -5,
@@ -5410,7 +5090,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179545-soqn",
+    "_id": "tx-1783233973931-ubho",
     "date": "2026-06-25",
     "description": "Fees transfer ADCB",
     "amount": -0.5,
@@ -5420,7 +5100,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179546-elwt",
+    "_id": "tx-1783233973932-a8cv",
     "date": "2026-06-25",
     "description": "Grocery",
     "amount": -7.5,
@@ -5430,7 +5110,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179547-qnux",
+    "_id": "tx-1783233973933-zmxt",
     "date": "2026-06-26",
     "description": "Grocery",
     "amount": -4,
@@ -5440,7 +5120,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179548-vro6",
+    "_id": "tx-1783233973934-7qjy",
     "date": "2026-06-27",
     "description": "Grocery",
     "amount": -8,
@@ -5450,7 +5130,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179549-f2vh",
+    "_id": "tx-1783233973935-sl6d",
     "date": "2026-06-27",
     "description": "Ahl sham",
     "amount": -15,
@@ -5460,7 +5140,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179550-0b42",
+    "_id": "tx-1783233973936-hkmi",
     "date": "2026-06-28",
     "description": "Ahl sham",
     "amount": -15,
@@ -5470,7 +5150,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179551-vx1l",
+    "_id": "tx-1783233973937-jmb8",
     "date": "2026-06-28",
     "description": "Grocery",
     "amount": -6.5,
@@ -5480,7 +5160,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179552-xrp1",
+    "_id": "tx-1783233973938-6csw",
     "date": "2026-06-29",
     "description": "Ecart (Grocery)",
     "amount": -8.5,
@@ -5490,7 +5170,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179553-bemp",
+    "_id": "tx-1783233973939-m64a",
     "date": "2026-06-29",
     "description": "Fruits & Dates",
     "amount": -12,
@@ -5500,7 +5180,7 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179554-xf0p",
+    "_id": "tx-1783233973940-taqy",
     "date": "2026-06-29",
     "description": "Grocery",
     "amount": -16.5,
@@ -5510,13 +5190,53 @@
     "year": 2026
   },
   {
-    "_id": "tx-1783232179555-2z7x",
+    "_id": "tx-1783233973941-meqc",
     "date": "2026-06-29",
     "description": "Grocery",
     "amount": -4,
     "type": "Expense",
     "paymentMethod": "Card",
     "month": "June",
+    "year": 2026
+  },
+  {
+    "_id": "tx-1783233973942-vjw0",
+    "date": "2026-07-01",
+    "description": "Carrefour Food Order delivery",
+    "amount": -37.31,
+    "type": "Expense",
+    "paymentMethod": "Card",
+    "month": "July",
+    "year": 2026
+  },
+  {
+    "_id": "tx-1783233973943-ilc1",
+    "date": "2026-07-01",
+    "description": "Balance saving from June",
+    "amount": 391.5,
+    "type": "Income",
+    "paymentMethod": "Cash",
+    "month": "July",
+    "year": 2026
+  },
+  {
+    "_id": "tx-1783233973944-qigb",
+    "date": "2026-07-01",
+    "description": "Salary June GRM",
+    "amount": 5500,
+    "type": "Income",
+    "paymentMethod": "Card",
+    "month": "July",
+    "year": 2026
+  },
+  {
+    "_id": "tx-1783233973945-2jbd",
+    "date": "2026-07-01",
+    "description": "Refund amount rafik rent Studio",
+    "amount": -1000,
+    "type": "Expense",
+    "paymentMethod": "Card",
+    "month": "July",
     "year": 2026
   }
 ]
