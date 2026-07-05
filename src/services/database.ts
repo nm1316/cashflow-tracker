@@ -190,11 +190,43 @@ class DB {
   getAllTransactions(): Transaction[] { return [...this.data]; }
   isOnline(): boolean { return this.onlineState; }
 
+  private async pushToCloud(): Promise<void> {
+    this.notifyS({ syncing: true, lastSync: null, connected: this.onlineState, error: null });
+    try {
+      const payload = JSON.stringify({ data: this.data });
+      const res = await fetch('/api/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+      });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      this.notifyS({ syncing: false, lastSync: Date.now(), connected: true, error: null });
+    } catch (err) {
+      this.notifyS({ syncing: false, lastSync: null, connected: this.onlineState, error: `Cloud sync failed: ${err instanceof Error ? err.message : 'Unknown'}` });
+    }
+  }
+
+  private async syncDown(): Promise<void> {
+    try {
+      const res = await fetch('/api/data');
+      if (res.ok) {
+        const cloud = await res.json();
+        if (Array.isArray(cloud) && cloud.length > 0) {
+          this.data = normalize(cloud);
+          saveLocal(this.data);
+          this.notify();
+        }
+      }
+    } catch {}
+  }
+
   async addTransaction(tx: Transaction): Promise<void> {
     const t = normalize([tx])[0];
     this.data = [...this.data, t];
     saveLocal(this.data);
     this.notify();
+    await this.pushToCloud();
+    await this.syncDown();
   }
 
   async updateTransaction(tx: Transaction): Promise<void> {
@@ -204,6 +236,8 @@ class DB {
       this.data = this.data.map((x, j) => j === i ? t : x);
       saveLocal(this.data);
       this.notify();
+      await this.pushToCloud();
+      await this.syncDown();
     }
   }
 
@@ -211,12 +245,24 @@ class DB {
     this.data = this.data.filter(x => x._id !== id);
     saveLocal(this.data);
     this.notify();
+    await this.pushToCloud();
+    await this.syncDown();
   }
 
   exportData(): string { return JSON.stringify(this.data, null, 2); }
 
   async importData(json: string): Promise<boolean> {
-    try { const p = JSON.parse(json); if (Array.isArray(p)) { this.data = normalize(p); saveLocal(this.data); this.notify(); return true; } } catch {}
+    try {
+      const p = JSON.parse(json);
+      if (Array.isArray(p)) {
+        this.data = normalize(p);
+        saveLocal(this.data);
+        this.notify();
+        await this.pushToCloud();
+        await this.syncDown();
+        return true;
+      }
+    } catch {}
     return false;
   }
 }
