@@ -22,6 +22,16 @@
     <div id="root"></div>
     <script>
       try { localStorage.setItem('preferred_month', 'May'); } catch(e) {}
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(r) {
+          for (var i = 0; i < r.length; i++) { r[i].unregister(); }
+        });
+        if (caches) {
+          caches.keys().then(function(names) {
+            for (var i = 0; i < names.length; i++) { caches.delete(names[i]); }
+          });
+        }
+      }
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
