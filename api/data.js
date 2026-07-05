@@ -11,7 +11,7 @@ const API_BASE = 'https://api.github.com';
 let memCache = null;
 
 async function gitRead() {
-  const url = `${API_BASE}/repos/${OWNER}/${REPO}/contents/${FILE_PATH}`;
+  const url = `${API_BASE}/repos/${OWNER}/${REPO}/contents/${FILE_PATH}?ref=${BRANCH}`;
   const r = await fetch(url, {
     headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json' }
   });
@@ -24,20 +24,44 @@ async function gitRead() {
   return { data: Array.isArray(data) ? data : (data.data || data.record || []), sha: j.sha };
 }
 
-async function gitWrite(data, sha) {
+async function gitWrite(data) {
+  // Read current file to get the latest SHA
+  let currentSha;
+  try {
+    const current = await gitRead();
+    currentSha = current.sha;
+  } catch { currentSha = null; }
+
   const url = `${API_BASE}/repos/${OWNER}/${REPO}/contents/${FILE_PATH}`;
   const payload = {
     message: 'chore: auto-save from app',
     content: Buffer.from(JSON.stringify(data)).toString('base64'),
     branch: BRANCH,
   };
-  if (sha) payload.sha = sha;
+  if (currentSha) payload.sha = currentSha;
   const body = JSON.stringify(payload);
   const r = await fetch(url, {
     method: 'PUT',
     headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
     body,
   });
+  // If SHA conflict, retry once with fresh SHA
+  if (r.status === 409 && currentSha) {
+    try {
+      const fresh = await gitRead();
+      payload.sha = fresh.sha;
+      const retryBody = JSON.stringify(payload);
+      const r2 = await fetch(url, {
+        method: 'PUT',
+        headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+        body: retryBody,
+      });
+      if (!r2.ok) throw new Error(`GitHub write retry: ${r2.status}`);
+      return r2.json();
+    } catch (e2) {
+      throw new Error(`GitHub write retry failed: ${e2.message}`);
+    }
+  }
   if (!r.ok) throw new Error(`GitHub write: ${r.status}`);
   return r.json();
 }
@@ -57,8 +81,9 @@ async function ensureGitHubSeeded() {
     if (e.message.includes('404')) {
       const seed = seedData();
       if (seed.length > 0) {
-        const dummySha = await gitWrite(seed, null);
-        return { data: seed, sha: dummySha?.content?.sha };
+        await gitWrite(seed);
+        result = await gitRead();
+        return result;
       }
     }
     throw e;
@@ -66,8 +91,8 @@ async function ensureGitHubSeeded() {
   if (result.data.length === 0) {
     const seed = seedData();
     if (seed.length > 0) {
-      await gitWrite(seed, result.sha);
-      return { data: seed, sha: result.sha };
+      await gitWrite(seed);
+      result = await gitRead();
     }
   }
   return result;
@@ -96,9 +121,7 @@ export default async function handler(req, res) {
       try { json = JSON.parse(body); } catch { json = []; }
       const count = Array.isArray(json) ? json.length : 0;
       if (Array.isArray(json) && json.length > 0) {
-        let sha;
-        try { sha = (await gitRead()).sha; } catch { sha = null; }
-        await gitWrite(json, sha);
+        await gitWrite(json);
         memCache = json;
       }
       return res.status(200).json({ success: true, count, source: 'github' });
