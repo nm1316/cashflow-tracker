@@ -8,8 +8,6 @@ const BRANCH = 'master';
 const FILE_PATH = 'public/data.json';
 const API_BASE = 'https://api.github.com';
 
-let memCache = null;
-
 async function gitRead() {
   const url = `${API_BASE}/repos/${OWNER}/${REPO}/contents/${FILE_PATH}?ref=${BRANCH}`;
   const r = await fetch(url, {
@@ -109,9 +107,7 @@ export default async function handler(req, res) {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, s-maxage=0');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
-      if (memCache && Array.isArray(memCache) && memCache.length > 0) return res.status(200).json(memCache);
       const { data } = await ensureGitHubSeeded();
-      memCache = data;
       return res.status(200).json(data);
     }
 
@@ -122,7 +118,6 @@ export default async function handler(req, res) {
       const count = Array.isArray(json) ? json.length : 0;
       if (Array.isArray(json) && json.length > 0) {
         await gitWrite(json);
-        memCache = json;
       }
       return res.status(200).json({ success: true, count, source: 'github' });
     }

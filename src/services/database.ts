@@ -181,6 +181,18 @@ class DB {
   private async pushToCloud(): Promise<void> {
     this.notifyS({ syncing: true, lastSync: null, connected: this.onlineState, error: null });
     try {
+      // Merge with latest cloud data to prevent overwriting records from other sessions
+      try {
+        const cloud = await pullCloud();
+        if (cloud && cloud.length > 0) {
+          const cloudIds = new Set(cloud.map(t => t._id));
+          const localIds = new Set(this.data.map(t => t._id));
+          const missingFromLocal = cloud.filter(t => !localIds.has(t._id));
+          if (missingFromLocal.length > 0) {
+            this.data = normalize([...missingFromLocal, ...this.data]);
+          }
+        }
+      } catch {}
       const payload = JSON.stringify(this.data);
       const res = await fetch('/api/data?t=' + Date.now(), {
         method: 'POST',
