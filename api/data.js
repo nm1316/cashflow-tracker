@@ -8,6 +8,10 @@ const BRANCH = 'master';
 const FILE_PATH = 'public/data.json';
 const API_BASE = 'https://api.github.com';
 
+function countReal(data) {
+  return data.filter(t => t.description && t.description.trim() && t.amount !== 0).length;
+}
+
 async function gitRead() {
   const url = `${API_BASE}/repos/${OWNER}/${REPO}/contents/${FILE_PATH}?ref=${BRANCH}`;
   const r = await fetch(url, {
@@ -22,29 +26,21 @@ async function gitRead() {
   return { data: Array.isArray(data) ? data : (data.data || data.record || []), sha: j.sha };
 }
 
-async function gitWrite(data) {
-  // Read current file to get the latest SHA
-  let currentSha;
-  try {
-    const current = await gitRead();
-    currentSha = current.sha;
-  } catch { currentSha = null; }
-
+async function gitWrite(data, sha) {
   const url = `${API_BASE}/repos/${OWNER}/${REPO}/contents/${FILE_PATH}`;
   const payload = {
     message: 'chore: auto-save from app',
     content: Buffer.from(JSON.stringify(data)).toString('base64'),
     branch: BRANCH,
   };
-  if (currentSha) payload.sha = currentSha;
+  if (sha) payload.sha = sha;
   const body = JSON.stringify(payload);
   const r = await fetch(url, {
     method: 'PUT',
     headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
     body,
   });
-  // If SHA conflict, retry once with fresh SHA
-  if (r.status === 409 && currentSha) {
+  if (r.status === 409 && sha) {
     try {
       const fresh = await gitRead();
       payload.sha = fresh.sha;
@@ -62,6 +58,23 @@ async function gitWrite(data) {
   }
   if (!r.ok) throw new Error(`GitHub write: ${r.status}`);
   return r.json();
+}
+
+async function saveBackup(currentSha, currentData) {
+  try {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = `backups/data-${ts}.json`;
+    const payload = {
+      message: `chore: backup ${currentSha} @ ${ts}`,
+      content: Buffer.from(JSON.stringify(currentData)).toString('base64'),
+      branch: BRANCH,
+    };
+    await fetch(`${API_BASE}/repos/${OWNER}/${REPO}/contents/${backupPath}`, {
+      method: 'PUT',
+      headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {}
 }
 
 function seedData() {
@@ -117,9 +130,23 @@ export default async function handler(req, res) {
       try { json = JSON.parse(body); } catch { json = []; }
       const count = Array.isArray(json) ? json.length : 0;
       if (Array.isArray(json) && json.length > 0) {
-        await gitWrite(json);
+        const current = await gitRead();
+        const incomingReal = countReal(json);
+        const currentReal = countReal(current.data);
+
+        // SAFETY NET: reject writes that would drop too many records (stale overwrite detection)
+        if (currentReal > 10 && incomingReal < currentReal - 5) {
+          console.error(`BLOCKED: incoming ${incomingReal} real records vs ${currentReal} current — possible stale overwrite`);
+          return res.status(200).json({ error: 'Write blocked: your local data is behind the cloud. Please refresh the page and try again.', count, blocked: true });
+        }
+
+        // AUTO-BACKUP before every write (saved to backups/ directory on GitHub)
+        await saveBackup(current.sha, current.data);
+
+        await gitWrite(json, current.sha);
+        return res.status(200).json({ success: true, count, source: 'github' });
       }
-      return res.status(200).json({ success: true, count, source: 'github' });
+      return res.status(200).json({ success: true, count: 0, source: 'github' });
     }
 
     return res.status(200).json({ error: 'Method not allowed' });
