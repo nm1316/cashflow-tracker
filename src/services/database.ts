@@ -108,6 +108,7 @@ class DB {
   private ls: Set<(t: Transaction[]) => void> = new Set();
   private ss: Set<(s: SyncStatus) => void> = new Set();
   private data: Transaction[] = [];
+  private deletedIds: Set<string> = new Set();
   private onlineState = true;
 
   constructor() {
@@ -187,7 +188,7 @@ class DB {
         if (cloud && cloud.length > 0) {
           const cloudIds = new Set(cloud.map(t => t._id));
           const localIds = new Set(this.data.map(t => t._id));
-          const missingFromLocal = cloud.filter(t => !localIds.has(t._id));
+          const missingFromLocal = cloud.filter(t => !localIds.has(t._id) && !this.deletedIds.has(t._id));
           if (missingFromLocal.length > 0) {
             this.data = normalize([...missingFromLocal, ...this.data]);
           }
@@ -239,10 +240,12 @@ class DB {
   }
 
   async deleteTransaction(id: string): Promise<void> {
+    this.deletedIds.add(id);
     this.data = this.data.filter(x => x._id !== id);
     this.notify();
     await this.pushToCloud();
     await this.syncDown();
+    this.deletedIds.delete(id);
   }
 
   exportData(): string { return JSON.stringify(this.data, null, 2); }
