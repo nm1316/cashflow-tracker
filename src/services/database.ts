@@ -74,6 +74,8 @@ function autoAdvanceMonth(data: Transaction[]): { transaction?: Transaction; new
       return { month: months[maxMonthIdx], year: maxYear };
     })();
 
+    if (latestMonth === currentMonth && latestYear === currentYear) return null;
+
     const closedKey = `${latestMonth}-${latestYear}`;
     if (closed.includes(closedKey)) return null;
 
@@ -151,6 +153,36 @@ class DB {
     const key = `${month}-${year}`;
     if (!closed.includes(key)) { closed.push(key); saveClosedMonths(closed); }
     try { localStorage.removeItem(AUTO_ADVANCE_KEY); } catch {}
+  }
+
+  async closeAndAdvance(month: string, year: number): Promise<{ month: string; year: number; amount: number }> {
+    this.closeMonth(month, year);
+    const { month: nextMonth, year: nextYear } = getNextMonth(month, year);
+    const { net } = getMonthSummary(this.data, month, year);
+    const closingDate = `${String(nextYear)}-${String(months.indexOf(nextMonth) + 1).padStart(2, '0')}-01`;
+
+    const existing = this.data.find(t => t.month === nextMonth && t.year === nextYear && t._id.startsWith('auto-ob-'));
+    const openingTx: Transaction = {
+      _id: existing?._id || `auto-ob-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      date: existing?.date || closingDate,
+      description: 'OPENING BALANCE',
+      amount: net,
+      type: net >= 0 ? 'Income' : 'Expense',
+      paymentMethod: existing?.paymentMethod || 'Card',
+      month: nextMonth,
+      year: nextYear,
+    };
+
+    if (existing) {
+      this.data = this.data.map(t => t._id === existing._id ? openingTx : t);
+    } else {
+      this.data = [...this.data, openingTx];
+    }
+
+    this.notify();
+    await this.pushToCloud();
+    await this.syncDown();
+    return { month: nextMonth, year: nextYear, amount: net };
   }
 
   getCurrentDisplayMonth(): { month: string; year: number } {

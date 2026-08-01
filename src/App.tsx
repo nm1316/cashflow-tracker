@@ -714,15 +714,13 @@ export default function App({ onLogout }: { onLogout: () => void }) {
                 Cancel
               </button>
               <button onClick={async () => {
-                db.closeMonth(selectedMonth, selectedYear);
-                const idx = MONTH_ORDER.indexOf(selectedMonth);
-                const nextM = idx === 11 ? 'January' : MONTH_ORDER[idx + 1];
-                const nextY = idx === 11 ? selectedYear + 1 : selectedYear;
-                setSelectedMonth(nextM);
-                setSelectedYear(nextY);
-                try { localStorage.setItem('preferred_month', `${nextM}-${nextY}`); } catch {}
+                const res = await db.closeAndAdvance(selectedMonth, selectedYear);
+                setSelectedMonth(res.month);
+                setSelectedYear(res.year);
+                setAllTransactions(db.getAllTransactions());
+                try { localStorage.setItem('preferred_month', `${res.month}-${res.year}`); } catch {}
                 setShowCloseModal(false);
-                setToast({ message: `${selectedMonth} closed! Opening balance created in ${nextM}`, type: 'success' });
+                setToast({ message: `${selectedMonth} closed! Opening balance ${formatAED(res.amount)} created in ${res.month}`, type: 'success' });
               }}
                 className="flex-1 h-11 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold text-sm transition-colors shadow-md">
                 Close & Advance
