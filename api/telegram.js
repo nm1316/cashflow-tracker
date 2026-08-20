@@ -1,6 +1,11 @@
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8635500877:AAG58sb2F7ukXBDmytsWAvq5jqEKqvOdIo4';
 const APP_URL = 'https://cashflow-tracker-kappa-lime-eight.vercel.app';
-const APP_BASE = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : APP_URL;
+const GITHUB_TOKEN = process.env.GH_TOKEN;
+const GH_OWNER = 'nm1316';
+const GH_REPO = 'cashflow-tracker';
+const GH_BRANCH = 'master';
+const GH_FILE = 'public/data.json';
+const GH_API = 'https://api.github.com';
 
 let userState = new Map();
 let subscribedUsers = new Set();
@@ -129,27 +134,42 @@ function parseTransaction(text) {
   return results;
 }
 
-async function fetchData() {
-  try {
-    const r = await fetch(`${APP_BASE}/api/data?t=${Date.now()}`, {
-      headers: { 'Cache-Control': 'no-cache' }
+async function ghRead() {
+  const r = await fetch(`${GH_API}/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}?ref=${GH_BRANCH}`, {
+    headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json' }
+  });
+  if (!r.ok) throw new Error(`GitHub read ${r.status}`);
+  const j = await r.json();
+  let content = Buffer.from(j.content, 'base64').toString('utf8');
+  if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
+  const data = JSON.parse(content.trim());
+  return { data: Array.isArray(data) ? data : (data.data || data.record || []), sha: j.sha };
+}
+
+async function ghWrite(data, sha) {
+  const r = await fetch(`${GH_API}/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}`, {
+    method: 'PUT',
+    headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'chore: telegram bot', content: Buffer.from(JSON.stringify(data)).toString('base64'), branch: GH_BRANCH, sha }),
+  });
+  if (r.status === 409 && sha) {
+    const fresh = await ghRead();
+    const r2 = await fetch(`${GH_API}/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}`, {
+      method: 'PUT',
+      headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'chore: telegram bot', content: Buffer.from(JSON.stringify(data)).toString('base64'), branch: GH_BRANCH, sha: fresh.sha }),
     });
-    if (r.ok) { const d = await r.json(); return Array.isArray(d) ? d : []; }
-  } catch (e) { console.error('fetchData error:', e); }
-  return [];
+    return r2.ok;
+  }
+  return r.ok;
+}
+
+async function fetchData() {
+  try { const { data } = await ghRead(); return data; } catch (e) { console.error('fetchData error:', e); return []; }
 }
 
 async function pushData(data) {
-  try {
-    const r = await fetch(`${APP_BASE}/api/data?t=${Date.now()}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    const j = await r.json();
-    if (j.blocked) return false;
-    return r.ok;
-  } catch (e) { console.error('pushData error:', e); return false; }
+  try { const { sha } = await ghRead(); return await ghWrite(data, sha); } catch (e) { console.error('pushData error:', e); return false; }
 }
 
 function getMonthData(data) {
