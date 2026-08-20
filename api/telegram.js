@@ -63,12 +63,65 @@ function parseIntent(text) {
   return 'add';
 }
 
+function extractDate(text) {
+  const now = new Date();
+  const cy = now.getFullYear();
+  const cm = now.getMonth();
+  const months = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11,
+    january:0,february:1,march:2,april:3,june:5,july:6,august:7,september:8,october:9,november:10,december:11 };
+  const lower = text.toLowerCase();
+
+  // "yesterday"
+  if (/\b(yesterday| hier)\b/.test(lower)) {
+    const y = new Date(now.getTime() - 86400000);
+    return { dateStr: `${y.getFullYear()}-${String(y.getMonth()+1).padStart(2,'0')}-${String(y.getDate()).padStart(2,'0')}`, month: MONTHS[y.getMonth()], year: y.getFullYear() };
+  }
+
+  // "today"
+  if (/\b(today|aujourd)\b/.test(lower)) {
+    return { dateStr: todayStr(), month: MONTHS[cm], year: cy };
+  }
+
+  // "15 aug" or "aug 15" or "15 august"
+  const m1 = lower.match(/\b(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)\b/);
+  const m2 = lower.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)\s+(\d{1,2})\b/);
+  const dayMonth = m1 || m2;
+  if (dayMonth) {
+    const day = m1 ? parseInt(m1[1]) : parseInt(m2[2]);
+    const mon = m1 ? months[m1[2]] : months[m2[1]];
+    if (mon !== undefined && day >= 1 && day <= 31) {
+      const d = new Date(cy, mon, day);
+      return { dateStr: `${cy}-${String(mon+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`, month: MONTHS[mon], year: cy };
+    }
+  }
+
+  // "15/08" or "15-08" or "15.08"
+  const slashMatch = lower.match(/\b(\d{1,2})[\/\-.](\d{1,2})\b/);
+  if (slashMatch) {
+    const day = parseInt(slashMatch[1]);
+    const mon = parseInt(slashMatch[2]) - 1;
+    if (mon >= 0 && mon <= 11 && day >= 1 && day <= 31) {
+      return { dateStr: `${cy}-${String(mon+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`, month: MONTHS[mon], year: cy };
+    }
+  }
+
+  // "2026-08-15"
+  const isoMatch = lower.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
+  if (isoMatch) {
+    const yr = parseInt(isoMatch[1]);
+    const mon = parseInt(isoMatch[2]) - 1;
+    const day = parseInt(isoMatch[3]);
+    if (mon >= 0 && mon <= 11 && day >= 1 && day <= 31) {
+      return { dateStr: `${yr}-${String(mon+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`, month: MONTHS[mon], year: yr };
+    }
+  }
+
+  return null;
+}
+
 function parseTransaction(text) {
   const lines = text.split('\n').filter(l => l.trim());
   const results = [];
-  const td = todayStr();
-  const cm = currentMonth();
-  const cy = currentYear();
 
   for (const line of lines) {
     const raw = line.trim();
@@ -78,9 +131,7 @@ function parseTransaction(text) {
     let type = 'Expense';
 
     // ── amount extraction ──
-    // Pattern 1: explicit negative like "-15 coffee"
     const negMatch = raw.match(/(-)\s*(\d+(?:[.,]\d+)?)\s*(aed)?/i);
-    // Pattern 2: positive number like "15 coffee" or "5500 salary"
     const posMatch = raw.match(/(\d+(?:[.,]\d+)?)\s*(aed)?/i);
 
     if (negMatch) {
@@ -96,7 +147,7 @@ function parseTransaction(text) {
 
     // ── income / expense detection ──
     const lower = raw.toLowerCase();
-    const incomeWords = /salary|income|deposit|refund|received|from|balance|bonus|gain|revenu| Revenue| credit|transfer\s*in|wage/i;
+    const incomeWords = /salary|income|deposit|refund|received|from|balance|bonus|gain|revenu|Revenue|credit|transfer\s*in|wage/i;
     const expenseWords = /spent|paid|bought|expense|cost|buy|transfer\s*out|deduction|retrait|depense|achat|paye/i;
 
     if (negMatch) {
@@ -111,24 +162,32 @@ function parseTransaction(text) {
 
     amount = type === 'Income' ? Math.abs(amount) : -Math.abs(amount);
 
+    // ── date extraction ──
+    const extracted = extractDate(raw);
+    const txDate = extracted ? extracted.dateStr : todayStr();
+    const txMonth = extracted ? extracted.month : currentMonth();
+    const txYear = extracted ? extracted.year : currentYear();
+
     // ── description ──
     let desc = raw
       .replace(/-?\s*\d+(?:[.,]\d+)?/g, '')
       .replace(/\b(aed|eur|dzd)\b/gi, '')
       .replace(/\b(for|on|the|at|to|by|of)\b/gi, '')
+      .replace(/\b(yesterday|today|hier|aujourd|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)\b/gi, '')
+      .replace(/\d{1,2}[\/\-\.]\d{1,2}/g, '')
       .replace(/\s+/g, ' ')
       .trim();
     if (desc.length < 2) desc = 'Transaction';
 
     results.push({
       _id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      date: td,
+      date: txDate,
       description: desc.toUpperCase().substring(0, 60),
       amount: Math.round(amount * 100) / 100,
       type,
       paymentMethod: /cash|نقدا|especes?/i.test(raw) ? 'Cash' : 'Card',
-      month: cm,
-      year: cy,
+      month: txMonth,
+      year: txYear,
     });
   }
   return results;
@@ -255,28 +314,28 @@ Just type naturally! I understand:
 • "my balance" / "how much"
 
 ➕ <b>ADD EXPENSE</b>
-• "-15 coffee" / "-20 metro"
-• "spent 100 on taxi"
+• <code>-15 coffee</code>
+• <code>-20 metro 15 aug</code>  ← with date
+• <code>-100 taxi yesterday</code>
+• <code>-350 food 15/08</code>
 
 💵 <b>ADD INCOME</b>
-• "5500 salary"
-• "500 from Ahmed"
+• <code>5500 salary 1 jul</code>
+• <code>500 from Ahmed 10 aug</code>
+
+📅 <b>DATE FORMATS</b>
+• <code>15 aug</code> / <code>aug 15</code>
+• <code>15/08</code> / <code>15-08</code>
+• <code>yesterday</code> / <code>today</code>
+• No date = today automatically
 
 🗑️ <b>DELETE</b>
 • "delete last"
 
 📊 <b>REPORTS</b>
 • "monthly report" / "daily report"
-• "show my spending"
-
-🔍 <b>SEARCH</b>
-• "search metro"
-• "find viva"
 
 ━━━━━━━━━━━━━━━━━━━━━━
-💡 <b>Tip:</b> Default = expense unless you say "salary" / "from" / "income"
-━━━━━━━━━━━━━━━━━━━━━━
-
 📱 <b>App:</b> ${APP_URL}`;
 }
 
@@ -319,7 +378,7 @@ export default async function handler(req, res) {
       }
       else if (data === 'cb_add') {
         await editMessage(chatId, msgId,
-          '➕ <b>Add Transaction</b>\n\nJust type naturally!\n\nExamples:\n• <code>-15 coffee</code>\n• <code>-20 metro</code>\n• <code>5500 salary</code>\n• <code>500 from Ahmed</code>',
+          '➕ <b>Add Transaction</b>\n\nJust type naturally!\n\nExamples:\n• <code>-15 coffee</code>\n• <code>-20 metro 15 aug</code>\n• <code>5500 salary 1 jul</code>\n• <code>-100 taxi yesterday</code>',
           [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Cancel', callback_data: 'cb_menu' }]]
         );
         userState.set(chatId, { waitingFor: 'add' });
@@ -479,7 +538,7 @@ export default async function handler(req, res) {
     const intent = parseIntent(text);
 
     if (intent === 'help') {
-      await sendMessage(chatId, `🤖 <b>Cashflow AI</b>\n\nYour personal expense manager! Just type naturally.\n\nExamples:\n• <code>-15 coffee</code>\n• <code>-20 metro</code>\n• <code>5500 salary</code>\n• <code>500 from Ahmed</code>\n• "my balance"\n• "monthly report"\n• "delete last"\n\nType <b>help</b> for full commands`, menuKeyboard());
+      await sendMessage(chatId, `🤖 <b>Cashflow AI</b>\n\nYour personal expense manager! Just type naturally.\n\nExamples:\n• <code>-15 coffee</code>\n• <code>-20 metro 15 aug</code>\n• <code>5500 salary 1 jul</code>\n• <code>my balance</code>\n• <code>monthly report</code>\n• <code>delete last</code>\n\nType <b>help</b> for full commands`, menuKeyboard());
       await res.status(200).json({ ok: true });
       return;
     }
