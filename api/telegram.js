@@ -1,251 +1,169 @@
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8635500877:AAG58sb2F7ukXBDmytsWAvq5jqEKqvOdIo4';
-const JSONBIN_BIN_ID = '69d223dd856a682189ff28c7';
-const JSONBIN_API_KEY = process.env.JSONBIN_API_KEY || '$2a$10$QwwAuP12n..jYPPFfwVAZuEzgLY3mtZLdcE.Pac5OV/U12k8AQFqG';
-const APP_URL = 'https://cashflow-tracker-kappa-lime.vercel.app';
-const DAILY_BUDGET = 100;
+const APP_URL = 'https://cashflow-tracker-kappa-lime-eight.vercel.app';
+const APP_BASE = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : APP_URL;
 
 let userState = new Map();
 let subscribedUsers = new Set();
+
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const MONTH_ABBR = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+
+function now() { return new Date(); }
+function todayStr() {
+  const n = now();
+  return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;
+}
+function currentMonth() { return MONTHS[now().getMonth()]; }
+function currentYear() { return now().getFullYear(); }
+function formatDay(d) { return new Date(d+'T00:00:00').toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); }
+function formatShort(d) { return new Date(d+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'}); }
 
 async function sendMessage(chatId, text, keyboard = null) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   const body = { chat_id: chatId, text, parse_mode: 'HTML' };
   if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
-  await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  try { await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch {}
+}
+
+async function editMessage(chatId, messageId, text, keyboard = null) {
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`;
+  const body = { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML' };
+  if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
+  try { await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch {}
 }
 
 async function answerCallback(callbackQueryId, text = '') {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`;
-  await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callback_query_id: callbackQueryId, text }) });
+  try { await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callback_query_id: callbackQueryId, text }) }); } catch {}
 }
 
 function parseIntent(text) {
   const t = text.toLowerCase().trim();
-  const words = t.split(/\s+/);
-  
-  // Check for pure number first (might be adding expense)
-  const pureNum = t.match(/^[\d,.]+$/);
-  if (pureNum) return 'quick_add';
-  
-  // Balance queries
-  if (/balance|how much|how many|what.*have|left|remaining|my money|cash|money left|total|خلاص|كم الفلوس|sole|saldo/i.test(t)) return 'balance';
-  
-  // Delete operations
-  if (/^delete|^remove|^cancel last|^erase last|^مسح|^حذف|^supprimer|^eliminar|^delete last|^remove last/i.test(t)) return 'delete';
-  
-  // Edit operations  
-  if (/edit|change|update|modify|fix amount|correct|تعديل|تغيير|수정/i.test(t)) return 'edit';
-  
-  // Reports and statistics
-  if (/report|summary|monthly|stats|statistics|تقرير|ملخص|month|rapport|stastistics/i.test(t)) return 'report';
-  
-  // Top expenses
-  if (/top.*expense|biggest|largest|most.*spent|expensive|top expenses|اهم/i.test(t)) return 'top';
-  
-  // List all transactions
-  if (/list.*all|show.*all|view.*all|all.*transaction|tous|كل|show transactions/i.test(t)) return 'list_all';
-  
-  // Category breakdown
-  if (/category|breakdown|spending.*by|تصنيف|اقسام|par categorie/i.test(t)) return 'category';
-  
-  // Savings plan
-  if (/save|saving|allocate|savings.*plan|توفير|epaargne/i.test(t)) return 'savings';
-  
-  // Search
-  if (/search|find|look.*for|where.*is|which.*spent|بحث|ابحث|chercher/i.test(t)) return 'search';
-  
-  // Export/backup
-  if (/export|backup|download|json|تصدير|exporter/i.test(t)) return 'export';
-  
-  // Income only
-  if (/income only|only income|all income|list income|دخل|salaire|revenu/i.test(t)) return 'list_income';
-  
-  // Expenses only
-  if (/expense only|only expense|all expense|list expense|expenses|مصروف|depense/i.test(t)) return 'list_expense';
-  
-  // Help/menu
-  if (/subscribe|report daily|تقرير يومي|daily report|notify|تنبيه/i.test(t)) return 'subscribe';
-  if (/unsubscribe|stop|ايقاف/i.test(t)) return 'unsubscribe';
-  if (/yesterday|امس Hier/i.test(t)) return 'yesterday';
-  if (/dates|calendar|التقويم|which dates/i.test(t)) return 'date_picker';
-  if (/help|command|menu|option|what.*can.*do|مساعدة|aide|help me|/test(t) || text === '?' || text === '/help' || text === '/start') return 'help';
-  
-  // Adding transaction - common patterns
-  if (/add|spent|paid|bought|transfer|received|deposit|withdraw|صرف|اضافة|اشتريت|دفع|depense|depenses|paye|achat/i.test(t)) return 'add';
-  
-  // Natural number + text patterns
-  const numWithText = t.match(/^(\d+[,.]?\d*)\s+(.+)/);
-  if (numWithText) return 'add';
-  
-  // Just a number might be quick add
-  if (/^\d+$/.test(t)) return 'quick_add';
-  
-  return 'unknown';
+  if (/^(\/start|\/help|help|command|menu|option|\?)$/i.test(t)) return 'help';
+  if (/balance|how much|how many|left|remaining|my money|cash|total|sole|saldo/i.test(t)) return 'balance';
+  if (/^(delete|remove|cancel last|erase last|مسح|حذف)/i.test(t)) return 'delete';
+  if (/report|summary|monthly|stats|rapport/i.test(t)) return 'report';
+  if (/top.*expense|biggest|largest|most.*spent|expensive/i.test(t)) return 'top';
+  if (/list.*all|show.*all|view.*all|all.*transaction|tous/i.test(t)) return 'list_all';
+  if (/category|breakdown|spending.*by/i.test(t)) return 'category';
+  if (/savings?|allocate|epargne/i.test(t)) return 'savings';
+  if (/search|find|look.*for|chercher/i.test(t)) return 'search';
+  if (/export|backup|download|json/i.test(t)) return 'export';
+  if (/income only|only income|all income|list income/i.test(t)) return 'list_income';
+  if (/expense only|only expense|all expense|list expense/i.test(t)) return 'list_expense';
+  if (/subscribe|report daily|daily report|notify/i.test(t)) return 'subscribe';
+  if (/unsubscribe|stop|aykona/i.test(t)) return 'unsubscribe';
+  if (/yesterday/i.test(t)) return 'yesterday';
+  if (/dates|calendar/i.test(t)) return 'date_picker';
+  return 'add';
 }
 
 function parseTransaction(text) {
-  const transactions = [];
   const lines = text.split('\n').filter(l => l.trim());
-  
-  const monthMatch = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i);
-  const month = monthMatch ? monthMatch[1] : 'apr';
-  
-  const dayMatch = text.match(/\b(\d{1,2})\b/);
-  const day = dayMatch ? dayMatch[1].padStart(2, '0') : String(new Date().getDate()).padStart(2, '0');
-  
+  const results = [];
+  const td = todayStr();
+  const cm = currentMonth();
+  const cy = currentYear();
+
   for (const line of lines) {
+    const raw = line.trim();
+    if (!raw) continue;
+
     let amount = 0;
     let type = 'Expense';
-    
-    // Find amount - positive for income, negative for expense
-    const positiveMatch = line.match(/[+]?\s*([\d,]+\.?\d*)\s*(aed|eur|dzd)?/i);
-    if (positiveMatch) {
-      amount = parseFloat(positiveMatch[1].replace(/,/g, ''));
-      
-      // Determine type based on keywords
-      const lowerLine = line.toLowerCase();
-      const incomeWords = /salary|income|deposit|refund|received|transfer.*in|مرتب|دخل|salaire|revenu|gain/i;
-      const expenseWords = /spent|paid|bought|expense|cost|buy|buy|achat|paye|depense/i;
-      
-      if (incomeWords.test(lowerLine)) {
-        type = 'Income';
-      } else if (expenseWords.test(lowerLine)) {
-        type = 'Expense';
-      } else if (amount > 100 && !/metro|taxi|coffee|lunch|dinner|food|cafe|restaurant/i.test(lowerLine)) {
-        type = 'Income';
-      } else {
-        type = 'Expense';
-      }
-      
-      amount = type === 'Income' ? Math.abs(amount) : -Math.abs(amount);
+
+    // ── amount extraction ──
+    // Pattern 1: explicit negative like "-15 coffee"
+    const negMatch = raw.match(/(-)\s*(\d+(?:[.,]\d+)?)\s*(aed)?/i);
+    // Pattern 2: positive number like "15 coffee" or "5500 salary"
+    const posMatch = raw.match(/(\d+(?:[.,]\d+)?)\s*(aed)?/i);
+
+    if (negMatch) {
+      amount = parseFloat(negMatch[2].replace(/,/g, ''));
+      type = 'Expense';
+    } else if (posMatch) {
+      amount = parseFloat(posMatch[1].replace(/,/g, ''));
+    } else {
+      continue;
     }
-    
-    // Extract description - remove numbers and clean up
-    let description = line
-      .replace(/[+-]?\s*[\d,]+\.?\d*\s*(aed|eur|dzd)?/gi, '')
-      .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/gi, '')
-      .replace(/\d{1,2}/g, '')
-      .replace(/\b(for|on|the|at|to|by)\b/gi, '')
-      .replace(/aed/gi, '')
+
+    if (amount === 0) continue;
+
+    // ── income / expense detection ──
+    const lower = raw.toLowerCase();
+    const incomeWords = /salary|income|deposit|refund|received|from|balance|bonus|gain|revenu| Revenue| credit|transfer\s*in|wage/i;
+    const expenseWords = /spent|paid|bought|expense|cost|buy|transfer\s*out|deduction|retrait|depense|achat|paye/i;
+
+    if (negMatch) {
+      type = 'Expense';
+    } else if (incomeWords.test(lower)) {
+      type = 'Income';
+    } else if (expenseWords.test(lower)) {
+      type = 'Expense';
+    } else {
+      type = 'Expense';
+    }
+
+    amount = type === 'Income' ? Math.abs(amount) : -Math.abs(amount);
+
+    // ── description ──
+    let desc = raw
+      .replace(/-?\s*\d+(?:[.,]\d+)?/g, '')
+      .replace(/\b(aed|eur|dzd)\b/gi, '')
+      .replace(/\b(for|on|the|at|to|by|of)\b/gi, '')
       .replace(/\s+/g, ' ')
       .trim();
-    
-    if (description.length < 2) {
-      description = line.substring(0, 30).replace(/\d+/g, '').trim() || 'Transaction';
-    }
-    
-    if (amount !== 0) {
-      const isCash = /cash|especes|espece|نقدا/i.test(line);
-      transactions.push({
-        _id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        date: `2026-${getMonthNum(month)}-${day}`,
-        description: description.toUpperCase().substring(0, 60),
-        amount: Math.round(amount * 100) / 100,
-        type,
-        paymentMethod: isCash ? 'Cash' : 'Card',
-        month: getMonthName(month),
-        year: 2026
-      });
-    }
+    if (desc.length < 2) desc = 'Transaction';
+
+    results.push({
+      _id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      date: td,
+      description: desc.toUpperCase().substring(0, 60),
+      amount: Math.round(amount * 100) / 100,
+      type,
+      paymentMethod: /cash|نقدا|especes?/i.test(raw) ? 'Cash' : 'Card',
+      month: cm,
+      year: cy,
+    });
   }
-  return transactions;
-}
-
-function getMonthNum(m) { 
-  const months = {'jan':'01','feb':'02','mar':'03','apr':'04','may':'05','jun':'06','jul':'07','aug':'08','sep':'09','oct':'10','nov':'11','dec':'12'};
-  return months[m.toLowerCase()] || '04'; 
-}
-
-function getMonthName(m) { 
-  const months = {'jan':'January','feb':'February','mar':'March','apr':'April','may':'May','jun':'June','jul':'July','aug':'August','sep':'September','oct':'October','nov':'November','dec':'December'};
-  return months[m.toLowerCase()] || 'April'; 
+  return results;
 }
 
 async function fetchData() {
   try {
-    const r = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, { headers: { 'X-Master-Key': JSONBIN_API_KEY } });
-    if (r.ok) { const d = await r.json(); return d.record || []; }
-  } catch (e) { console.error(e); }
+    const r = await fetch(`${APP_BASE}/api/data?t=${Date.now()}`, {
+      headers: { 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) { const d = await r.json(); return Array.isArray(d) ? d : []; }
+  } catch (e) { console.error('fetchData error:', e); }
   return [];
 }
 
 async function pushData(data) {
   try {
-    const r = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-      body: JSON.stringify(data)
+    const r = await fetch(`${APP_BASE}/api/data?t=${Date.now()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
     });
+    const j = await r.json();
+    if (j.blocked) return false;
     return r.ok;
-  } catch (e) { console.error(e); return false; }
+  } catch (e) { console.error('pushData error:', e); return false; }
 }
 
 function getMonthData(data) {
-  return data.filter(t => t.month === 'April' && t.description && t.amount !== 0);
+  return data.filter(t => t.month === currentMonth() && t.year === currentYear() && t.description && t.amount !== 0);
 }
 
 function getTodayData(data) {
-  const today = new Date().toISOString().slice(0, 10);
-  return data.filter(t => t.date === today && t.description && t.amount !== 0);
+  const td = todayStr();
+  return data.filter(t => t.date === td && t.description && t.amount !== 0);
 }
 
 function getYesterdayData(data) {
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-  return data.filter(t => t.date === yesterday && t.description && t.amount !== 0);
-}
-
-async function sendDailyReport(chatId, dateStr = null) {
-  const d = await fetchData();
-  
-  let targetDate;
-  if (dateStr) {
-    targetDate = dateStr;
-  } else {
-    targetDate = new Date().toISOString().slice(0, 10);
-  }
-  
-  const dayData = d.filter(t => t.date === targetDate && t.description && t.amount !== 0);
-  const total = dayData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-  
-  const displayDate = new Date(targetDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  
-  let msg = `📊 ${displayDate}\n`;
-  msg += `━━━━━━━━━━━━\n`;
-  msg += `🛒 Total: AED ${total.toLocaleString()}\n\n`;
-  
-  if (dayData.length > 0) {
-    dayData.forEach(t => {
-      msg += `• ${t.description}: AED ${Math.abs(t.amount).toLocaleString()}\n`;
-    });
-  } else {
-    msg += `<i>No expenses</i>`;
-  }
-  
-  await sendMessage(chatId, msg);
-}
-
-async function sendDatePicker(chatId) {
-  const d = await fetchData();
-  const monthData = getMonthData(d);
-  const dates = [...new Set(monthData.map(t => t.date))].sort().reverse();
-  
-  let msg = `📅 <b>Select Date</b>\n\n`;
-  msg += `Available dates this month:\n`;
-  
-  const keyboard = [];
-  for (let i = 0; i < dates.length; i += 3) {
-    const row = [];
-    for (let j = i; j < Math.min(i + 3, dates.length); j++) {
-      const date = new Date(dates[j] + 'T00:00:00');
-      const day = date.getDate();
-      const label = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-      row.push({ text: label, callback_data: `date_${dates[j]}` });
-    }
-    keyboard.push(row);
-  }
-  keyboard.push([{ text: '📱 Open App', url: APP_URL }]);
-  
-  await sendMessage(chatId, msg, keyboard);
+  const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  return data.filter(t => t.date === y && t.description && t.amount !== 0);
 }
 
 async function getBalance(data) {
@@ -253,6 +171,46 @@ async function getBalance(data) {
   const income = d.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const expense = d.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
   return { income, expense, balance: income - expense, count: d.length };
+}
+
+async function sendDailyReport(chatId, dateStr = null) {
+  const d = await fetchData();
+  const target = dateStr || todayStr();
+  const dayData = d.filter(t => t.date === target && t.description && t.amount !== 0);
+  const total = dayData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const income = dayData.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+
+  let msg = `📊 <b>${formatDay(target)}</b>\n━━━━━━━━━━━━━━━━━━━━\n`;
+  if (income > 0) msg += `💵 Income: <b>AED ${income.toLocaleString()}</b>\n`;
+  msg += `🛒 Expenses: <b>AED ${total.toLocaleString()}</b>\n`;
+  if (dayData.length > 0) {
+    msg += `\n`;
+    dayData.forEach(t => {
+      msg += `${t.amount > 0 ? '💵' : '🛒'} ${t.description.substring(0,30)} — <b>AED ${Math.abs(t.amount).toLocaleString()}</b>\n`;
+    });
+  } else {
+    msg += `\n<i>No transactions today</i>`;
+  }
+  await sendMessage(chatId, msg);
+}
+
+async function sendDatePicker(chatId) {
+  const d = await fetchData();
+  const md = getMonthData(d);
+  const dates = [...new Set(md.map(t => t.date))].sort().reverse();
+
+  let msg = `📅 <b>${currentMonth()} ${currentYear()} — Select Date</b>\n\n`;
+  if (dates.length === 0) { msg += `<i>No dates this month</i>`; }
+  const keyboard = [];
+  for (let i = 0; i < Math.min(dates.length, 24); i += 3) {
+    const row = [];
+    for (let j = i; j < Math.min(i + 3, dates.length); j++) {
+      row.push({ text: formatShort(dates[j]), callback_data: `date_${dates[j]}` });
+    }
+    keyboard.push(row);
+  }
+  keyboard.push([{ text: '📱 Open App', url: APP_URL }]);
+  await sendMessage(chatId, msg, keyboard);
 }
 
 function menuKeyboard() {
@@ -263,54 +221,41 @@ function menuKeyboard() {
     [{ text: '➕ Add Transaction', callback_data: 'cb_add' }],
     [{ text: '🔝 Top Expenses', callback_data: 'cb_top' }],
     [{ text: '📱 Open App', url: APP_URL }],
-    [{ text: '❓ Help', callback_data: 'cb_help' }]
+    [{ text: '❓ Help', callback_data: 'cb_help' }],
   ];
 }
 
 function getHelpText() {
-  return `📖 <b>Cashflow AI - Natural Language Commands</b>
+  const m = currentMonth();
+  return `📖 <b>Cashflow AI — Commands</b>
 
 Just type naturally! I understand:
 
 💰 <b>BALANCE</b>
-• "my balance" / "how much do I have"
-• "كم الفلوس" / "sole"
-• "what's my cash"
+• "my balance" / "how much"
 
 ➕ <b>ADD EXPENSE</b>
-• "50 lunch" / "metro 20"
+• "-15 coffee" / "-20 metro"
 • "spent 100 on taxi"
-• "اشتريت lunch بـ 25"
-• "25 dirhams for coffee"
 
 💵 <b>ADD INCOME</b>
-• "salary 4500"
-• "received 500 from Ahmed"
-• "مرتب 4000"
+• "5500 salary"
+• "500 from Ahmed"
 
 🗑️ <b>DELETE</b>
-• "delete last" / "مسح"
-• "cancel last transaction"
+• "delete last"
 
 📊 <b>REPORTS</b>
-• "monthly report"
+• "monthly report" / "daily report"
 • "show my spending"
-• "rapport du mois"
-
-💎 <b>SAVINGS</b>
-• "show savings"
-• "how much should I save"
 
 🔍 <b>SEARCH</b>
 • "search metro"
-• "find viva transactions"
+• "find viva"
 
-━━━━━━━━━━━━━━━━━━━━
-💡 <b>Tips:</b>
-• Works in English, Arabic, French
-• Just type a number to quick add expense
-• Be specific: "50 AED lunch"
-━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
+💡 <b>Tip:</b> Default = expense unless you say "salary" / "from" / "income"
+━━━━━━━━━━━━━━━━━━━━━━
 
 📱 <b>App:</b> ${APP_URL}`;
 }
@@ -318,443 +263,413 @@ Just type naturally! I understand:
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     if (subscribedUsers.size > 0) {
-      for (const chatId of subscribedUsers) {
-        await sendDailyReport(chatId);
-      }
+      for (const chatId of subscribedUsers) { await sendDailyReport(chatId); }
     }
     return res.status(200).json({ ok: true, sent: subscribedUsers.size });
   }
-  
+
   try {
     const update = req.body;
     const msg = update.message || update.edited_message;
     const cbq = update.callback_query;
 
+    // ── Callback queries ──
     if (cbq) {
       const chatId = cbq.message.chat.id;
       const msgId = cbq.message.message_id;
       const data = cbq.data;
-      
+
       await answerCallback(cbq.id);
       const d = await fetchData();
 
       if (data === 'cb_menu') {
-        await editMessage(chatId, msgId, '🤖 <b>Cashflow AI Agent</b>\n\nYour personal expense manager!\n\nSelect option or type naturally:', menuKeyboard());
+        await editMessage(chatId, msgId, `🤖 <b>Cashflow AI</b>\n\nYour personal expense manager!\n\nSelect option or just type naturally:`, menuKeyboard());
       }
       else if (data === 'cb_balance') {
-        const bal = await getBalance(d);
-        const msg = `${bal.balance >= 0 ? '💰' : '⚠️'} <b>April 2026 Balance</b>\n\n` +
-          `💵 Income: <b>AED ${bal.income.toLocaleString()}</b>\n` +
-          `🛒 Expenses: <b>AED ${bal.expense.toLocaleString()}</b>\n` +
+        const b = await getBalance(d);
+        await editMessage(chatId, msgId,
+          `${b.balance >= 0 ? '💰' : '⚠️'} <b>${currentMonth()} ${currentYear()} Balance</b>\n\n` +
+          `💵 Income: <b>AED ${b.income.toLocaleString()}</b>\n` +
+          `🛒 Expenses: <b>AED ${b.expense.toLocaleString()}</b>\n` +
           `─────────────────\n` +
-          `${bal.balance >= 0 ? '💰' : '⚠️'} <b>Balance: AED ${bal.balance.toLocaleString()}</b>\n\n` +
-          `📊 ${bal.count} transactions`;
-        await editMessage(chatId, msgId, msg, [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+          `${b.balance >= 0 ? '💰' : '⚠️'} <b>Net: AED ${b.balance.toLocaleString()}</b>\n\n` +
+          `📊 ${b.count} transactions`,
+          [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]
+        );
       }
       else if (data === 'cb_add') {
-        await editMessage(chatId, msgId, '➕ <b>Add Transaction</b>\n\nJust type naturally!\n\nExamples:\n• "50 lunch"\n• "metro 20"\n• "salary 4500"\n• "apr 5 coffee 15"\n• "اشتريت بـ 25"', [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Cancel', callback_data: 'cb_menu' }]]);
+        await editMessage(chatId, msgId,
+          '➕ <b>Add Transaction</b>\n\nJust type naturally!\n\nExamples:\n• <code>-15 coffee</code>\n• <code>-20 metro</code>\n• <code>5500 salary</code>\n• <code>500 from Ahmed</code>',
+          [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Cancel', callback_data: 'cb_menu' }]]
+        );
         userState.set(chatId, { waitingFor: 'add' });
       }
       else if (data === 'cb_list_all') {
-        const txns = (await getMonthData(d)).reverse();
-        if (txns.length === 0) {
-          await editMessage(chatId, msgId, '📋 No transactions yet!\n\nAdd: "50 lunch"', [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+        const txns = getMonthData(d).reverse();
+        if (!txns.length) {
+          await editMessage(chatId, msgId, '📋 No transactions yet!\n\nAdd: <code>-15 coffee</code>', [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
         } else {
-          let text = `📋 <b>All Transactions</b> (${txns.length})\n\n`;
-          txns.slice(0, 10).forEach((t, i) => {
-            text += `${i + 1}. ${t.amount > 0 ? '💵' : '🛒'} ${t.date}\n   ${t.description.substring(0, 25)}\n   AED ${Math.abs(t.amount).toLocaleString()}\n\n`;
+          let t = `📋 <b>${currentMonth()} Transactions</b> (${txns.length})\n\n`;
+          txns.slice(0, 10).forEach((x, i) => {
+            t += `${i+1}. ${x.amount>0?'💵':'🛒'} ${x.date}\n   ${x.description.substring(0,25)}\n   AED ${Math.abs(x.amount).toLocaleString()}\n\n`;
           });
-          if (txns.length > 10) text += `...and ${txns.length - 10} more`;
-          await editMessage(chatId, msgId, text, [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+          if (txns.length > 10) t += `...and ${txns.length-10} more`;
+          await editMessage(chatId, msgId, t, [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
         }
       }
       else if (data === 'cb_list_income') {
-        const txns = (await getMonthData(d)).filter(t => t.amount > 0).reverse();
-        if (txns.length === 0) {
-          await editMessage(chatId, msgId, '💵 No income recorded!', [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+        const txns = getMonthData(d).filter(t => t.amount > 0).reverse();
+        if (!txns.length) {
+          await editMessage(chatId, msgId, '💵 No income recorded!', [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
         } else {
-          let text = `💵 <b>Income</b> (${txns.length})\n\n`;
-          txns.forEach((t, i) => { text += `${i + 1}. 💵 ${t.date} | ${t.description.substring(0, 20)}\n   +AED ${t.amount.toLocaleString()}\n\n`; });
-          text += `─────────────────\n💵 <b>Total: AED ${txns.reduce((s, t) => s + t.amount, 0).toLocaleString()}</b>`;
-          await editMessage(chatId, msgId, text, [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+          let t = `💵 <b>Income</b> (${txns.length})\n\n`;
+          txns.forEach((x, i) => { t += `${i+1}. 💵 ${x.date} | ${x.description.substring(0,20)}\n   +AED ${x.amount.toLocaleString()}\n\n`; });
+          t += `─────────────────\n💵 <b>Total: AED ${txns.reduce((s,x)=>s+x.amount,0).toLocaleString()}</b>`;
+          await editMessage(chatId, msgId, t, [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
         }
       }
       else if (data === 'cb_list_expense') {
-        const txns = (await getMonthData(d)).filter(t => t.amount < 0).reverse();
-        if (txns.length === 0) {
-          await editMessage(chatId, msgId, '🛒 No expenses recorded!', [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+        const txns = getMonthData(d).filter(t => t.amount < 0).reverse();
+        if (!txns.length) {
+          await editMessage(chatId, msgId, '🛒 No expenses recorded!', [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
         } else {
-          let text = `🛒 <b>Expenses</b> (${txns.length})\n\n`;
-          txns.forEach((t, i) => { text += `${i + 1}. 🛒 ${t.date} | ${t.description.substring(0, 20)}\n   -AED ${Math.abs(t.amount).toLocaleString()}\n\n`; });
-          text += `─────────────────\n🛒 <b>Total: AED ${txns.reduce((s, t) => s + Math.abs(t.amount), 0).toLocaleString()}</b>`;
-          await editMessage(chatId, msgId, text, [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+          let t = `🛒 <b>Expenses</b> (${txns.length})\n\n`;
+          txns.forEach((x, i) => { t += `${i+1}. 🛒 ${x.date} | ${x.description.substring(0,20)}\n   -AED ${Math.abs(x.amount).toLocaleString()}\n\n`; });
+          t += `─────────────────\n🛒 <b>Total: AED ${txns.reduce((s,x)=>s+Math.abs(x.amount),0).toLocaleString()}</b>`;
+          await editMessage(chatId, msgId, t, [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
         }
       }
       else if (data === 'cb_report') {
-        const monthData = await getMonthData(d);
-        const income = monthData.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-        const expense = monthData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-        
+        const md = getMonthData(d);
+        const inc = md.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+        const exp = md.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
         const byCat = {};
-        monthData.filter(t => t.amount < 0).forEach(t => {
-          const cat = t.description.split(' ')[0].substring(0, 12);
-          byCat[cat] = (byCat[cat] || 0) + Math.abs(t.amount);
-        });
-        const sorted = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
-
-        let text = `📊 <b>April 2026 Report</b>\n\n`;
-        text += `💵 Income: <b>AED ${income.toLocaleString()}</b>\n`;
-        text += `🛒 Expenses: <b>AED ${expense.toLocaleString()}</b>\n`;
-        text += `─────────────────\n`;
-        text += `💰 <b>Balance: AED ${(income - expense).toLocaleString()}</b>\n\n`;
-        text += `📁 <b>Top Categories:</b>\n`;
-        sorted.slice(0, 5).forEach(([cat, amt]) => { text += `🏷️ ${cat}: AED ${amt.toLocaleString()}\n`; });
-
-        await editMessage(chatId, msgId, text, [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+        md.filter(t => t.amount < 0).forEach(t => { const c = t.description.split(' ')[0].substring(0,12); byCat[c] = (byCat[c]||0) + Math.abs(t.amount); });
+        const sorted = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
+        let t = `📊 <b>${currentMonth()} ${currentYear()} Report</b>\n\n`;
+        t += `💵 Income: <b>AED ${inc.toLocaleString()}</b>\n🛒 Expenses: <b>AED ${exp.toLocaleString()}</b>\n─────────────────\n`;
+        t += `💰 <b>Balance: AED ${(inc-exp).toLocaleString()}</b>\n\n📁 Top Categories:\n`;
+        sorted.slice(0,5).forEach(([c,a]) => { t += `🏷️ ${c}: AED ${a.toLocaleString()}\n`; });
+        await editMessage(chatId, msgId, t, [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
       }
       else if (data === 'cb_top') {
-        const monthData = await getMonthData(d);
-        const expenses = monthData.filter(t => t.amount < 0).sort((a, b) => a.amount - b.amount);
-        const total = expenses.reduce((s, t) => s + Math.abs(t.amount), 0);
-
-        let text = `🔝 <b>Top Expenses</b>\n\n`;
-        expenses.slice(0, 5).forEach((t, i) => {
-          const pct = total > 0 ? Math.round(Math.abs(t.amount) / total * 100) : 0;
-          text += `${i + 1}. ${t.description.substring(0, 25)}\n   💸 AED ${Math.abs(t.amount).toLocaleString()} (${pct}%)\n\n`;
+        const md = getMonthData(d).filter(t => t.amount < 0).sort((a,b) => a.amount - b.amount);
+        const total = md.reduce((s,t) => s + Math.abs(t.amount), 0);
+        let t = `🔝 <b>Top Expenses</b>\n\n`;
+        md.slice(0,5).forEach((x,i) => {
+          const pct = total > 0 ? Math.round(Math.abs(x.amount)/total*100) : 0;
+          t += `${i+1}. ${x.description.substring(0,25)}\n   💸 AED ${Math.abs(x.amount).toLocaleString()} (${pct}%)\n\n`;
         });
-
-        await editMessage(chatId, msgId, text, [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+        await editMessage(chatId, msgId, t, [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
       }
       else if (data === 'cb_category') {
-        const monthData = await getMonthData(d);
+        const md = getMonthData(d).filter(t => t.amount < 0);
         const byCat = {};
-        monthData.filter(t => t.amount < 0).forEach(t => {
-          const cat = t.description.split(' ')[0].substring(0, 12);
-          byCat[cat] = (byCat[cat] || 0) + Math.abs(t.amount);
+        md.forEach(t => { const c = t.description.split(' ')[0].substring(0,12); byCat[c] = (byCat[c]||0) + Math.abs(t.amount); });
+        const sorted = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
+        const total = sorted.reduce((s,[,v]) => s+v, 0);
+        let t = `📁 <b>Spending by Category</b>\n\n`;
+        sorted.forEach(([c,a]) => {
+          const pct = total > 0 ? Math.round(a/total*100) : 0;
+          t += `🏷️ <b>${c}</b>: AED ${a.toLocaleString()} (${pct}%)\n`;
         });
-        const sorted = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
-        const total = sorted.reduce((s, [, v]) => s + v, 0);
-
-        let text = `📁 <b>Spending by Category</b>\n\n`;
-        sorted.forEach(([cat, amt]) => {
-          const pct = total > 0 ? Math.round(amt / total * 100) : 0;
-          text += `🏷️ <b>${cat}</b>: AED ${amt.toLocaleString()} (${pct}%)\n`;
-        });
-
-        await editMessage(chatId, msgId, text, [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+        await editMessage(chatId, msgId, t, [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
       }
       else if (data === 'cb_savings') {
-        const bal = await getBalance(d);
-        const s1 = Math.max(0, bal.balance * 0.25), em = Math.max(0, bal.balance * 0.30), debt = Math.max(0, bal.balance * 0.20), s2 = Math.max(0, bal.balance * 0.25);
-        let text = `💎 <b>Savings Plan</b>\n\n`;
-        text += `Available: <b>AED ${bal.balance.toLocaleString()}</b>\n\n`;
-        text += `🏦 Saving 1 (25%): AED ${s1.toLocaleString()}\n`;
-        text += `🚨 Emergency (30%): AED ${em.toLocaleString()}\n`;
-        text += `💳 Debt Plan (20%): AED ${debt.toLocaleString()}\n`;
-        text += `🏖️ Saving 2 (25%): AED ${s2.toLocaleString()}`;
-        await editMessage(chatId, msgId, text, [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+        const b = await getBalance(d);
+        const s1=Math.max(0,b.balance*0.25), em=Math.max(0,b.balance*0.30), debt=Math.max(0,b.balance*0.20), s2=Math.max(0,b.balance*0.25);
+        let t = `💎 <b>Savings Plan</b>\n\nAvailable: <b>AED ${b.balance.toLocaleString()}</b>\n\n`;
+        t += `🏦 Saving 1 (25%): AED ${s1.toLocaleString()}\n🚨 Emergency (30%): AED ${em.toLocaleString()}\n💳 Debt Plan (20%): AED ${debt.toLocaleString()}\n🏖️ Saving 2 (25%): AED ${s2.toLocaleString()}`;
+        await editMessage(chatId, msgId, t, [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
       }
       else if (data === 'cb_delete_last') {
-        const txns = await getMonthData(d);
-        if (txns.length === 0) {
+        const txns = getMonthData(d);
+        if (!txns.length) {
           await editMessage(chatId, msgId, '🗑️ No transactions to delete!', [[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
         } else {
           const last = txns[txns.length - 1];
           const updated = d.filter(t => t._id !== last._id);
           await pushData(updated);
-          const bal = await getBalance(updated);
-          await editMessage(chatId, msgId, `✅ <b>Deleted!</b>\n\n${last.description}\nAED ${Math.abs(last.amount).toLocaleString()}\n\n💰 Balance: <b>AED ${bal.balance.toLocaleString()}</b>`, [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+          const b = await getBalance(updated);
+          await editMessage(chatId, msgId,
+            `✅ <b>Deleted</b>\n\n${last.description}\nAED ${Math.abs(last.amount).toLocaleString()}\n\n💰 Balance: <b>AED ${b.balance.toLocaleString()}</b>`,
+            [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]
+          );
         }
       }
       else if (data === 'cb_help') {
-        await editMessage(chatId, msgId, getHelpText(), [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+        await editMessage(chatId, msgId, getHelpText(), [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
       }
       else if (data === 'cb_subscribe') {
         subscribedUsers.add(chatId);
-        await editMessage(chatId, msgId, '✅ <b>Daily Reports Enabled!</b>\n\nYou will receive a daily expense summary.\n\nSend "stop" to unsubscribe.', [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+        await editMessage(chatId, msgId, '✅ <b>Daily Reports Enabled!</b>\n\nYou will receive a daily expense summary.\n\nSend "stop" to unsubscribe.', [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
       }
       else if (data === 'cb_daily') {
-        const today = new Date().toISOString().slice(0, 10);
-        await sendDailyReport(chatId, today);
-        await editMessage(chatId, msgId, '✅ Sent!', [[{ text: '📱 Open App', url: APP_URL }], [{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
+        await sendDailyReport(chatId, todayStr());
+        await editMessage(chatId, msgId, '✅ Sent!', [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
       }
       else if (data === 'cb_dates') {
         await sendDatePicker(chatId);
       }
       else if (data && data.startsWith('date_')) {
-        const dateStr = data.replace('date_', '');
-        await sendDailyReport(chatId, dateStr);
+        await sendDailyReport(chatId, data.replace('date_', ''));
       }
 
       await res.status(200).json({ ok: true });
       return;
     }
 
+    // ── Message handling ──
     if (!msg) return res.status(200).json({ ok: true });
 
     const chatId = msg.chat.id;
-    const text = msg.text || '';
+    const text = (msg.text || '').trim();
+    if (!text) return res.status(200).json({ ok: true });
+
     const state = userState.get(chatId) || {};
-    
-    // Handle add state
+
+    // ── Waiting for add input ──
     if (state.waitingFor === 'add') {
       const txns = parseTransaction(text);
-      if (txns.length === 0) {
-        await sendMessage(chatId, '❌ Could not understand. Try:\n• "50 lunch"\n• "metro 20"\n• "salary 4500"');
+      if (!txns.length) {
+        await sendMessage(chatId, '❌ Could not understand. Try:\n• <code>-15 coffee</code>\n• <code>-20 metro</code>\n• <code>5500 salary</code>');
         await res.status(200).json({ ok: true });
         return;
       }
-      const updated = [...d, ...txns];
-      await pushData(updated);
-      const bal = await getBalance(updated);
-      let msg = `✅ <b>Added!</b>\n\n`;
-      txns.forEach(t => { msg += `${t.amount > 0 ? '💵' : '🛒'} ${t.description}\n   AED ${Math.abs(t.amount).toLocaleString()}\n`; });
-      msg += `─────────────────\n💰 Balance: <b>AED ${bal.balance.toLocaleString()}</b>`;
-      await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }]]);
+      const fetched = await fetchData();
+      const updated = [...fetched, ...txns];
+      const ok = await pushData(updated);
+      const b = await getBalance(updated);
+      let reply = '';
+      txns.forEach(t => {
+        const icon = t.amount > 0 ? '💵' : '🛒';
+        const sign = t.amount > 0 ? '+' : '-';
+        reply += `${icon} <b>${t.description}</b>\n   ${sign}AED ${Math.abs(t.amount).toLocaleString()} · ${t.type} · ${t.paymentMethod}\n`;
+      });
+      reply += `\n📅 ${formatDay(txns[0].date)}`;
+      reply += ok ? '\n☁️ <i>Synced to cloud</i>' : '\n⚠️ <i>Cloud sync failed</i>';
+      reply += `\n\n💰 <b>${currentMonth()} Balance: AED ${b.balance.toLocaleString()}</b>`;
+      await sendMessage(chatId, reply, [[{ text: '📱 Open App', url: APP_URL }]]);
       userState.delete(chatId);
       await res.status(200).json({ ok: true });
       return;
     }
 
-    const fetchedData = await fetchData();
+    // ── Direct chat input (no state required) ──
     const intent = parseIntent(text);
 
-    switch (intent) {
-      case 'start':
-      case 'help':
-        await sendMessage(chatId, '🤖 <b>Cashflow AI Agent</b>\n\nYour personal expense manager! Type naturally.\n\nExamples:\n• "my balance"\n• "50 lunch"\n• "salary 4500"\n• "delete last"\n• "monthly report"\n• "daily report" to subscribe\n• "help" for all commands', menuKeyboard());
-        break;
+    if (intent === 'help') {
+      await sendMessage(chatId, `🤖 <b>Cashflow AI</b>\n\nYour personal expense manager! Just type naturally.\n\nExamples:\n• <code>-15 coffee</code>\n• <code>-20 metro</code>\n• <code>5500 salary</code>\n• <code>500 from Ahmed</code>\n• "my balance"\n• "monthly report"\n• "delete last"\n\nType <b>help</b> for full commands`, menuKeyboard());
+      await res.status(200).json({ ok: true });
+      return;
+    }
 
-      case 'subscribe':
-        subscribedUsers.add(chatId);
-        await sendMessage(chatId, '✅ <b>Daily Reports Enabled!</b>\n\nYou will receive a daily expense summary every evening.\n\nSend "stop" to unsubscribe.', [[{ text: '📱 Open App', url: APP_URL }]]);
-        break;
+    if (intent === 'subscribe') {
+      subscribedUsers.add(chatId);
+      await sendMessage(chatId, '✅ <b>Daily Reports Enabled!</b>\n\nYou will receive a daily expense summary.\n\nSend "stop" to unsubscribe.', [[{ text: '📱 Open App', url: APP_URL }]]);
+      await res.status(200).json({ ok: true });
+      return;
+    }
 
-      case 'unsubscribe':
-        subscribedUsers.delete(chatId);
-        await sendMessage(chatId, '❌ <b>Daily Reports Unsubscribed</b>\n\nSend "daily report" to subscribe again.', [[{ text: '📱 Open App', url: APP_URL }]]);
-        break;
+    if (intent === 'unsubscribe') {
+      subscribedUsers.delete(chatId);
+      await sendMessage(chatId, '❌ <b>Unsubscribed</b>\n\nSend "daily report" to re-subscribe.', [[{ text: '📱 Open App', url: APP_URL }]]);
+      await res.status(200).json({ ok: true });
+      return;
+    }
 
-      case 'yesterday': {
-        const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-        await sendDailyReport(chatId, yesterday);
-        break;
-      }
+    if (intent === 'yesterday') {
+      const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      await sendDailyReport(chatId, y);
+      await res.status(200).json({ ok: true });
+      return;
+    }
 
-      case 'date_picker': {
-        await sendDatePicker(chatId);
-        break;
-      }
+    if (intent === 'date_picker') {
+      await sendDatePicker(chatId);
+      await res.status(200).json({ ok: true });
+      return;
+    }
 
-      case 'balance': {
-        const bal = await getBalance(fetchedData);
-        const msg = `${bal.balance >= 0 ? '💰' : '⚠️'} <b>April Balance</b>\n\n` +
-          `💵 Income: <b>AED ${bal.income.toLocaleString()}</b>\n` +
-          `🛒 Expenses: <b>AED ${bal.expense.toLocaleString()}</b>\n` +
-          `─────────────────\n` +
-          `${bal.balance >= 0 ? '💰' : '⚠️'} <b>Balance: AED ${bal.balance.toLocaleString()}</b>\n\n` +
-          `📊 ${bal.count} transactions`;
-        await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }], [{ text: '📊 Report', callback_data: 'cb_report' }]]);
-        break;
-      }
+    const fetched = await fetchData();
 
-      case 'delete': {
-        const txns = await getMonthData(fetchedData);
-        if (txns.length === 0) {
-          await sendMessage(chatId, '🗑️ No transactions to delete!');
-          break;
-        }
+    if (intent === 'balance') {
+      const b = await getBalance(fetched);
+      await sendMessage(chatId,
+        `${b.balance >= 0 ? '💰' : '⚠️'} <b>${currentMonth()} ${currentYear()} Balance</b>\n\n` +
+        `💵 Income: <b>AED ${b.income.toLocaleString()}</b>\n` +
+        `🛒 Expenses: <b>AED ${b.expense.toLocaleString()}</b>\n` +
+        `─────────────────\n` +
+        `${b.balance >= 0 ? '💰' : '⚠️'} <b>Net: AED ${b.balance.toLocaleString()}</b>\n\n` +
+        `📊 ${b.count} transactions`,
+        [[{ text: '📱 Open App', url: APP_URL }]]
+      );
+      await res.status(200).json({ ok: true });
+      return;
+    }
+
+    if (intent === 'delete') {
+      const txns = getMonthData(fetched);
+      if (!txns.length) {
+        await sendMessage(chatId, '🗑️ No transactions to delete!');
+      } else {
         const last = txns[txns.length - 1];
-        const updated = fetchedData.filter(t => t._id !== last._id);
+        const updated = fetched.filter(t => t._id !== last._id);
         await pushData(updated);
-        const bal = await getBalance(updated);
-        await sendMessage(chatId, `✅ <b>Deleted!</b>\n\n${last.description}\nAED ${Math.abs(last.amount).toLocaleString()}\n\n💰 Balance: <b>AED ${bal.balance.toLocaleString()}</b>`, [[{ text: '📱 Open App', url: APP_URL }]]);
-        break;
+        const b = await getBalance(updated);
+        await sendMessage(chatId,
+          `✅ <b>Deleted</b>\n\n${last.description}\nAED ${Math.abs(last.amount).toLocaleString()}\n\n💰 Balance: <b>AED ${b.balance.toLocaleString()}</b>`,
+          [[{ text: '📱 Open App', url: APP_URL }]]
+        );
       }
+      await res.status(200).json({ ok: true });
+      return;
+    }
 
-      case 'add':
-      case 'quick_add': {
-        const txns = parseTransaction(text);
-        if (txns.length === 0) {
-          // Try simple number parsing
-          const amount = parseFloat(text.replace(/[^0-9.]/g, ''));
-          if (amount > 0) {
-            const desc = 'Transaction';
-            const today = new Date();
-            const tx = {
-              _id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              date: `2026-04-${String(today.getDate()).padStart(2, '0')}`,
-              description: desc.toUpperCase(),
-              amount: -amount,
-              type: 'Expense',
-              paymentMethod: 'Card',
-              month: 'April',
-              year: 2026
-            };
-            const updated = [...fetchedData, tx];
-            await pushData(updated);
-            const bal = await getBalance(updated);
-            await sendMessage(chatId, `✅ <b>Added!</b>\n\n${desc}\nAED ${amount.toLocaleString()}\n\n💰 Balance: <b>AED ${bal.balance.toLocaleString()}</b>`, [[{ text: '📱 Open App', url: APP_URL }]]);
-          } else {
-            await sendMessage(chatId, '❌ Could not understand. Try:\n• "50 lunch"\n• "metro 20"\n• "salary 4500"');
-          }
-          break;
-        }
-        const updated = [...fetchedData, ...txns];
-        await pushData(updated);
-        const bal = await getBalance(updated);
-        let msg = `✅ <b>Added!</b>\n\n`;
-        txns.forEach(t => { msg += `${t.amount > 0 ? '💵' : '🛒'} ${t.description}\n   AED ${Math.abs(t.amount).toLocaleString()}\n`; });
-        msg += `─────────────────\n💰 Balance: <b>AED ${bal.balance.toLocaleString()}</b>`;
-        await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }]]);
-        break;
-      }
+    if (intent === 'report') {
+      const md = getMonthData(fetched);
+      const inc = md.filter(t => t.amount > 0).reduce((s,t) => s+t.amount, 0);
+      const exp = md.filter(t => t.amount < 0).reduce((s,t) => s+Math.abs(t.amount), 0);
+      const byCat = {};
+      md.filter(t => t.amount < 0).forEach(t => { const c = t.description.split(' ')[0].substring(0,12); byCat[c] = (byCat[c]||0) + Math.abs(t.amount); });
+      const sorted = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
+      let t = `📊 <b>${currentMonth()} ${currentYear()} Report</b>\n\n`;
+      t += `💵 Income: <b>AED ${inc.toLocaleString()}</b>\n🛒 Expenses: <b>AED ${exp.toLocaleString()}</b>\n─────────────────\n`;
+      t += `💰 <b>Balance: AED ${(inc-exp).toLocaleString()}</b>\n\n📁 Top Categories:\n`;
+      sorted.slice(0,5).forEach(([c,a]) => { t += `🏷️ ${c}: AED ${a.toLocaleString()}\n`; });
+      await sendMessage(chatId, t, [[{ text: '📱 Open App', url: APP_URL }]]);
+      await res.status(200).json({ ok: true });
+      return;
+    }
 
-      case 'list_all': {
-        const txns = (await getMonthData(fetchedData)).reverse();
-        if (txns.length === 0) {
-          await sendMessage(chatId, '📋 No transactions yet!\n\nAdd: "50 lunch"');
-        } else {
-          let msg = `📋 <b>All Transactions</b> (${txns.length})\n\n`;
-          txns.slice(0, 10).forEach((t, i) => {
-            msg += `${i + 1}. ${t.amount > 0 ? '💵' : '🛒'} ${t.date}\n   ${t.description.substring(0, 25)}\n   AED ${Math.abs(t.amount).toLocaleString()}\n\n`;
-          });
-          await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }]]);
-        }
-        break;
-      }
+    if (intent === 'top') {
+      const md = getMonthData(fetched).filter(t => t.amount < 0).sort((a,b) => a.amount - b.amount);
+      const total = md.reduce((s,t) => s+Math.abs(t.amount), 0);
+      let t = `🔝 <b>Top Expenses</b>\n\n`;
+      md.slice(0,5).forEach((x,i) => {
+        const pct = total > 0 ? Math.round(Math.abs(x.amount)/total*100) : 0;
+        t += `${i+1}. ${x.description.substring(0,25)}\n   💸 AED ${Math.abs(x.amount).toLocaleString()} (${pct}%)\n\n`;
+      });
+      await sendMessage(chatId, t, [[{ text: '📱 Open App', url: APP_URL }]]);
+      await res.status(200).json({ ok: true });
+      return;
+    }
 
-      case 'list_income': {
-        const txns = (await getMonthData(fetchedData)).filter(t => t.amount > 0).reverse();
-        if (txns.length === 0) {
-          await sendMessage(chatId, '💵 No income recorded!\n\nAdd: "salary 4500"');
-        } else {
-          let msg = `💵 <b>Income</b> (${txns.length})\n\n`;
-          txns.forEach((t, i) => { msg += `${i + 1}. 💵 ${t.date} | ${t.description.substring(0, 20)}\n   +AED ${t.amount.toLocaleString()}\n\n`; });
-          msg += `─────────────────\n💵 <b>Total: AED ${txns.reduce((s, t) => s + t.amount, 0).toLocaleString()}</b>`;
-          await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }]]);
-        }
-        break;
-      }
-
-      case 'list_expense': {
-        const txns = (await getMonthData(fetchedData)).filter(t => t.amount < 0).reverse();
-        if (txns.length === 0) {
-          await sendMessage(chatId, '🛒 No expenses recorded!');
-        } else {
-          let msg = `🛒 <b>Expenses</b> (${txns.length})\n\n`;
-          txns.forEach((t, i) => { msg += `${i + 1}. 🛒 ${t.date} | ${t.description.substring(0, 20)}\n   -AED ${Math.abs(t.amount).toLocaleString()}\n\n`; });
-          msg += `─────────────────\n🛒 <b>Total: AED ${txns.reduce((s, t) => s + Math.abs(t.amount), 0).toLocaleString()}</b>`;
-          await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }]]);
-        }
-        break;
-      }
-
-      case 'report': {
-        const monthData = await getMonthData(fetchedData);
-        const income = monthData.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-        const expense = monthData.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-        
-        const byCat = {};
-        monthData.filter(t => t.amount < 0).forEach(t => {
-          const cat = t.description.split(' ')[0].substring(0, 12);
-          byCat[cat] = (byCat[cat] || 0) + Math.abs(t.amount);
+    if (intent === 'list_all') {
+      const txns = getMonthData(fetched).reverse();
+      if (!txns.length) {
+        await sendMessage(chatId, '📋 No transactions yet!\n\nAdd: <code>-15 coffee</code>');
+      } else {
+        let t = `📋 <b>${currentMonth()} Transactions</b> (${txns.length})\n\n`;
+        txns.slice(0,10).forEach((x,i) => {
+          t += `${i+1}. ${x.amount>0?'💵':'🛒'} ${x.date}\n   ${x.description.substring(0,25)}\n   AED ${Math.abs(x.amount).toLocaleString()}\n\n`;
         });
-        const sorted = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
-
-        let msg = `📊 <b>April 2026 Report</b>\n\n`;
-        msg += `💵 Income: <b>AED ${income.toLocaleString()}</b>\n`;
-        msg += `🛒 Expenses: <b>AED ${expense.toLocaleString()}</b>\n`;
-        msg += `─────────────────\n`;
-        msg += `💰 <b>Balance: AED ${(income - expense).toLocaleString()}</b>\n\n`;
-        msg += `📁 <b>Top Categories:</b>\n`;
-        sorted.slice(0, 5).forEach(([cat, amt]) => { msg += `🏷️ ${cat}: AED ${amt.toLocaleString()}\n`; });
-        msg += `\n📱 ${APP_URL}`;
-
-        await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }]]);
-        break;
+        if (txns.length > 10) t += `...and ${txns.length-10} more`;
+        await sendMessage(chatId, t, [[{ text: '📱 Open App', url: APP_URL }]]);
       }
+      await res.status(200).json({ ok: true });
+      return;
+    }
 
-      case 'top': {
-        const monthData = await getMonthData(fetchedData);
-        const expenses = monthData.filter(t => t.amount < 0).sort((a, b) => a.amount - b.amount);
-        const total = expenses.reduce((s, t) => s + Math.abs(t.amount), 0);
+    if (intent === 'list_income') {
+      const txns = getMonthData(fetched).filter(t => t.amount > 0).reverse();
+      if (!txns.length) {
+        await sendMessage(chatId, '💵 No income recorded!\n\nAdd: <code>5500 salary</code>');
+      } else {
+        let t = `💵 <b>Income</b> (${txns.length})\n\n`;
+        txns.forEach((x,i) => { t += `${i+1}. 💵 ${x.date} | ${x.description.substring(0,20)}\n   +AED ${x.amount.toLocaleString()}\n\n`; });
+        t += `─────────────────\n💵 <b>Total: AED ${txns.reduce((s,x)=>s+x.amount,0).toLocaleString()}</b>`;
+        await sendMessage(chatId, t, [[{ text: '📱 Open App', url: APP_URL }]]);
+      }
+      await res.status(200).json({ ok: true });
+      return;
+    }
 
-        let msg = `🔝 <b>Top Expenses</b>\n\n`;
-        expenses.slice(0, 5).forEach((t, i) => {
-          const pct = total > 0 ? Math.round(Math.abs(t.amount) / total * 100) : 0;
-          msg += `${i + 1}. ${t.description.substring(0, 25)}\n   💸 AED ${Math.abs(t.amount).toLocaleString()} (${pct}%)\n\n`;
+    if (intent === 'list_expense') {
+      const txns = getMonthData(fetched).filter(t => t.amount < 0).reverse();
+      if (!txns.length) {
+        await sendMessage(chatId, '🛒 No expenses recorded!');
+      } else {
+        let t = `🛒 <b>Expenses</b> (${txns.length})\n\n`;
+        txns.forEach((x,i) => { t += `${i+1}. 🛒 ${x.date} | ${x.description.substring(0,20)}\n   -AED ${Math.abs(x.amount).toLocaleString()}\n\n`; });
+        t += `─────────────────\n🛒 <b>Total: AED ${txns.reduce((s,x)=>s+Math.abs(x.amount),0).toLocaleString()}</b>`;
+        await sendMessage(chatId, t, [[{ text: '📱 Open App', url: APP_URL }]]);
+      }
+      await res.status(200).json({ ok: true });
+      return;
+    }
+
+    if (intent === 'category') {
+      const md = getMonthData(fetched).filter(t => t.amount < 0);
+      const byCat = {};
+      md.forEach(t => { const c = t.description.split(' ')[0].substring(0,12); byCat[c] = (byCat[c]||0) + Math.abs(t.amount); });
+      const sorted = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
+      const total = sorted.reduce((s,[,v]) => s+v, 0);
+      let t = `📁 <b>Spending by Category</b>\n\n`;
+      sorted.forEach(([c,a]) => {
+        const pct = total > 0 ? Math.round(a/total*100) : 0;
+        t += `🏷️ <b>${c}</b>: AED ${a.toLocaleString()} (${pct}%)\n`;
+      });
+      await sendMessage(chatId, t, [[{ text: '📱 Open App', url: APP_URL }]]);
+      await res.status(200).json({ ok: true });
+      return;
+    }
+
+    if (intent === 'savings') {
+      const b = await getBalance(fetched);
+      const s1=Math.max(0,b.balance*0.25), em=Math.max(0,b.balance*0.30), debt=Math.max(0,b.balance*0.20), s2=Math.max(0,b.balance*0.25);
+      let t = `💎 <b>Savings Plan</b>\n\nAvailable: <b>AED ${b.balance.toLocaleString()}</b>\n\n`;
+      t += `🏦 Saving 1 (25%): <b>AED ${s1.toLocaleString()}</b>\n`;
+      t += `🚨 Emergency (30%): <b>AED ${em.toLocaleString()}</b>\n`;
+      t += `💳 Debt Plan (20%): <b>AED ${debt.toLocaleString()}</b>\n`;
+      t += `🏖️ Saving 2 (25%): <b>AED ${s2.toLocaleString()}</b>`;
+      await sendMessage(chatId, t, [[{ text: '📱 Open App', url: APP_URL }]]);
+      await res.status(200).json({ ok: true });
+      return;
+    }
+
+    if (intent === 'search') {
+      const query = text.replace(/search|find|look.*for|chercher/gi, '').trim();
+      const matches = fetched.filter(t => t.description && t.description.toLowerCase().includes(query.toLowerCase()));
+      if (!matches.length) {
+        await sendMessage(chatId, `❌ No transactions found for "${query}"`, [[{ text: '📱 Open App', url: APP_URL }]]);
+      } else {
+        let t = `🔍 <b>Found ${matches.length}:</b>\n\n`;
+        matches.slice(0,10).forEach(x => {
+          t += `${x.amount>0?'💵':'🛒'} ${x.date} | ${x.description.substring(0,25)}\n   AED ${Math.abs(x.amount).toLocaleString()}\n`;
         });
-        await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }]]);
-        break;
+        await sendMessage(chatId, t, [[{ text: '📱 Open App', url: APP_URL }]]);
       }
+      await res.status(200).json({ ok: true });
+      return;
+    }
 
-      case 'category': {
-        const monthData = await getMonthData(fetchedData);
-        const byCat = {};
-        monthData.filter(t => t.amount < 0).forEach(t => {
-          const cat = t.description.split(' ')[0].substring(0, 12);
-          byCat[cat] = (byCat[cat] || 0) + Math.abs(t.amount);
-        });
-        const sorted = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
-        const total = sorted.reduce((s, [, v]) => s + v, 0);
-
-        let msg = `📁 <b>Spending by Category</b>\n\n`;
-        sorted.forEach(([cat, amt]) => {
-          const pct = total > 0 ? Math.round(amt / total * 100) : 0;
-          msg += `🏷️ <b>${cat}</b>: AED ${amt.toLocaleString()} (${pct}%)\n`;
-        });
-        await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }]]);
-        break;
-      }
-
-      case 'savings': {
-        const bal = await getBalance(fetchedData);
-        const s1 = Math.max(0, bal.balance * 0.25), em = Math.max(0, bal.balance * 0.30), debt = Math.max(0, bal.balance * 0.20), s2 = Math.max(0, bal.balance * 0.25);
-        
-        let msg = `💎 <b>Savings Plan</b>\n\n`;
-        msg += `Available: <b>AED ${bal.balance.toLocaleString()}</b>\n\n`;
-        msg += `🏦 Saving 1 (25%): <b>AED ${s1.toLocaleString()}</b>\n`;
-        msg += `🚨 Emergency (30%): <b>AED ${em.toLocaleString()}</b>\n`;
-        msg += `💳 Debt Plan (20%): <b>AED ${debt.toLocaleString()}</b>\n`;
-        msg += `🏖️ Saving 2 (25%): <b>AED ${s2.toLocaleString()}</b>\n\n📱 ${APP_URL}`;
-        await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }]]);
-        break;
-      }
-
-      case 'search': {
-        const query = text.replace(/search|find|look.*for|where.*is|which.*spent|بحث|ابحث|chercher/gi, '').trim();
-        const matches = fetchedData.filter(t => t.description && t.description.toLowerCase().includes(query.toLowerCase()));
-        
-        if (matches.length === 0) {
-          await sendMessage(chatId, `❌ No transactions found for "${query}"`, [[{ text: '📱 Open App', url: APP_URL }]]);
-        } else {
-          let msg = `🔍 <b>Found ${matches.length}:</b>\n\n`;
-          matches.slice(0, 10).forEach(t => {
-            msg += `${t.amount > 0 ? '💵' : '🛒'} ${t.date} | ${t.description.substring(0, 25)}\n   AED ${Math.abs(t.amount).toLocaleString()}\n`;
-          });
-          await sendMessage(chatId, msg, [[{ text: '📱 Open App', url: APP_URL }]]);
-        }
-        break;
-      }
-
-      default: {
-        // Try parsing as transaction
-        const txns = parseTransaction(text);
-        if (txns.length > 0) {
-          const updated = [...fetchedData, ...txns];
-          await pushData(updated);
-          const bal = await getBalance(updated);
-          await sendMessage(chatId, `✅ Added: ${txns[0].description}\n💰 AED ${Math.abs(txns[0].amount).toLocaleString()}\n\n💰 Balance: <b>AED ${bal.balance.toLocaleString()}</b>`, [[{ text: '📱 Open App', url: APP_URL }]]);
-        } else {
-          await sendMessage(chatId, `🤖 <b>Cashflow AI Agent</b>\n\nI didn't understand "${text}"\n\nTry:\n• "my balance"\n• "50 lunch"\n• "delete last"\n• "monthly report"\n• "help" for all commands\n\n📱 ${APP_URL}`, menuKeyboard());
-        }
-      }
+    // ── Default: parse as transaction (direct chat input) ──
+    const txns = parseTransaction(text);
+    if (txns.length > 0) {
+      const updated = [...fetched, ...txns];
+      const ok = await pushData(updated);
+      const b = await getBalance(updated);
+      let reply = '';
+      txns.forEach(t => {
+        const icon = t.amount > 0 ? '💵' : '🛒';
+        const sign = t.amount > 0 ? '+' : '-';
+        reply += `${icon} <b>${t.description}</b>\n   ${sign}AED ${Math.abs(t.amount).toLocaleString()} · ${t.type} · ${t.paymentMethod}\n`;
+      });
+      reply += `\n📅 ${formatDay(txns[0].date)}`;
+      reply += ok ? '\n☁️ <i>Synced to cloud</i>' : '\n⚠️ <i>Cloud sync failed</i>';
+      reply += `\n\n💰 <b>${currentMonth()} Balance: AED ${b.balance.toLocaleString()}</b>`;
+      await sendMessage(chatId, reply, [[{ text: '📱 Open App', url: APP_URL }]]);
+    } else {
+      await sendMessage(chatId,
+        `🤖 <b>Cashflow AI</b>\n\nI didn't understand "<i>${text.replace(/</g,'&lt;')}</i>"\n\nTry:\n• <code>-15 coffee</code>\n• <code>-20 metro</code>\n• <code>5500 salary</code>\n• <code>500 from Ahmed</code>\n• "my balance"\n• "monthly report"\n• "help" for all commands`,
+        menuKeyboard()
+      );
     }
 
     res.status(200).json({ ok: true });
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Telegram handler error:', error);
     res.status(200).json({ ok: true });
   }
 }
