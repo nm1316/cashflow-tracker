@@ -10,3 +10,4 @@ reset.js
 *.local
 secrets.json
 credentials.json
+.env*
