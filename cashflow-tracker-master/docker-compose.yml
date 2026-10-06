@@ -1,0 +1,41 @@
+version: '3.9'
+
+services:
+  couchdb:
+    image: couchdb:3.3
+    container_name: cashflow_couchdb
+    environment:
+      COUCHDB_USER: admin
+      COUCHDB_PASSWORD: password
+    ports:
+      - "5984:5984"
+    volumes:
+      - couchdb_data:/opt/couchdb/data
+      - couchdb_etc:/opt/couchdb/etc
+    restart: unless-stopped
+    networks:
+      - cashflow-net
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cashflow_app
+    ports:
+      - "8080:80"
+    environment:
+      VITE_COUCHDB_URL: http://admin:password@localhost:5984
+      VITE_DB_NAME: cashflow_tracker
+    depends_on:
+      - couchdb
+    restart: unless-stopped
+    networks:
+      - cashflow-net
+
+volumes:
+  couchdb_data:
+  couchdb_etc:
+
+networks:
+  cashflow-net:
+    driver: bridge

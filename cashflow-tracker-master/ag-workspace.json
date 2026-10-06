@@ -1,0 +1,26 @@
+{
+  "name": "cashflow-tracker",
+  "version": "1.0.0",
+  "description": "Personal cashflow expense tracker with PouchDB sync",
+  "antigravity": {
+    "mcpServers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+      }
+    },
+    "rules": [
+      "src/data/transactions.ts contains all seed data — edit there to add new months",
+      "src/services/database.ts is the single source of truth for all DB operations",
+      "All transactions are keyed by _id in PouchDB — never duplicate IDs",
+      "CouchDB sync is live and bidirectional — handle conflicts gracefully"
+    ],
+    "workspaces": [
+      {
+        "name": "cashflow-tracker",
+        "path": ".",
+        "description": "Main expense tracker app"
+      }
+    ]
+  }
+}
