@@ -5,5 +5,3 @@ compatibility_date = "2024-03-12"
 binding = "cashflow_db"
 database_name = "cashflow-db"
 database_id = "5769c720-6161-4e62-b83c-6341128ddad6"
-
-pages_build_output_dir = "dist"
