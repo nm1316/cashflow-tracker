@@ -24,9 +24,10 @@ export interface MonthSummary {
 
 export interface SyncStatus {
   syncing: boolean;
-  lastSync: Date | null;
+  lastSync: number | null;
   error: string | null;
   connected?: boolean;
+  queueLength?: number;
 }
 
 export interface NewTransaction {

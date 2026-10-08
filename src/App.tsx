@@ -362,7 +362,7 @@ export default function App({ onLogout }: { onLogout: () => void }) {
     });
     const unsubSync = db.onSyncStatusChange((status) => {
       setSyncStatus(status.syncing ? 'syncing' : status.connected ? 'cloud' : 'offline');
-      setPendingCount(status.error && status.error.includes('pending') ? 1 : 0);
+      setPendingCount(status.queueLength || 0);
     });
     return () => { unsub(); unsubSync(); };
   }, []);
@@ -500,6 +500,7 @@ export default function App({ onLogout }: { onLogout: () => void }) {
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/></svg>
               )}
               {syncStatus === 'syncing' ? 'Syncing...' : syncStatus === 'cloud' ? 'Synced' : 'Offline'}
+              {pendingCount > 0 ? ` (${pendingCount} pending)` : ''}
             </div>
 
             <button onClick={() => { const data = db.exportData(); const blob = new Blob([data], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `cashflow-backup-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-500 px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700">

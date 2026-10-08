@@ -2,6 +2,8 @@ import type { Transaction, SyncStatus } from '../types';
 
 const CLOSED_MONTHS_KEY = 'cashflow_closed_months';
 const AUTO_ADVANCE_KEY = 'cashflow_auto_advance';
+const LOCAL_CACHE_KEY = 'cashflow_data_cache';
+const OFFLINE_QUEUE_KEY = 'cashflow_offline_queue';
 
 const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -11,18 +13,11 @@ export function formatAED(amount: number): string { return `AED ${Math.abs(amoun
 export function formatEUR(amount: number): string { return `€${Math.abs(amount).toLocaleString('en-EU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 export function formatDZD(amount: number): string { return `${Math.abs(amount).toLocaleString('en-DZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DZD`; }
 
-async function pullCloud(): Promise<Transaction[] | null> {
-  for (const url of ['/api/data?t=' + Date.now(), '/data.json']) {
-    try {
-      const r = await fetch(url);
-      if (r.ok) {
-        const d = await r.json();
-        const data = Array.isArray(d) ? d : d?.record || d?.data;
-        if (Array.isArray(data) && data.length > 0) return data;
-      }
-    } catch {}
-  }
-  return null;
+export interface QueueOp {
+  action: 'add' | 'update' | 'delete';
+  tx?: Transaction;
+  id?: string;
+  timestamp: number;
 }
 
 function normalize(data: Transaction[]): Transaction[] {
@@ -49,105 +44,136 @@ function getNextMonth(currentMonth: string, currentYear: number): { month: strin
 function getClosedMonths(): string[] {
   try { const s = localStorage.getItem(CLOSED_MONTHS_KEY); return s ? JSON.parse(s) : []; } catch { return []; }
 }
-
 function saveClosedMonths(m: string[]): void {
   try { localStorage.setItem(CLOSED_MONTHS_KEY, JSON.stringify(m)); } catch {}
-}
-
-function autoAdvanceMonth(data: Transaction[]): { transaction?: Transaction; newMonth: string; newYear: number } | null {
-  try {
-    const closed = getClosedMonths();
-    const now = new Date();
-    const currentMonth = months[now.getMonth()];
-    const currentYear = now.getFullYear();
-
-    const { month: latestMonth, year: latestYear } = (() => {
-      let maxYear = 0;
-      let maxMonthIdx = -1;
-      data.forEach(t => {
-        if (t.year > maxYear || (t.year === maxYear && months.indexOf(t.month) > maxMonthIdx)) {
-          maxYear = t.year;
-          maxMonthIdx = months.indexOf(t.month);
-        }
-      });
-      if (maxMonthIdx < 0) return { month: currentMonth, year: currentYear };
-      return { month: months[maxMonthIdx], year: maxYear };
-    })();
-
-    if (latestMonth === currentMonth && latestYear === currentYear) return null;
-
-    const closedKey = `${latestMonth}-${latestYear}`;
-    if (closed.includes(closedKey)) return null;
-
-    const { income, expenses, net } = getMonthSummary(data, latestMonth, latestYear);
-    if (income === 0 && expenses === 0) return null;
-
-    const { month: nextMonth, year: nextYear } = getNextMonth(latestMonth, latestYear);
-    const closingDate = `${String(nextYear)}-${String(months.indexOf(nextMonth) + 1).padStart(2, '0')}-01`;
-    const hasOpeningBalance = data.some(t => t.month === nextMonth && t.year === nextYear && t.description.toLowerCase().includes('opening balance'));
-
-    if (!hasOpeningBalance) {
-      return {
-        transaction: {
-          _id: `auto-ob-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          date: closingDate,
-          description: 'OPENING BALANCE',
-          amount: net,
-          type: net >= 0 ? 'Income' : 'Expense',
-          paymentMethod: 'Card',
-          month: nextMonth,
-          year: nextYear,
-        },
-        newMonth: nextMonth,
-        newYear: nextYear,
-      };
-    }
-    return null;
-  } catch { return null; }
 }
 
 class DB {
   private ls: Set<(t: Transaction[]) => void> = new Set();
   private ss: Set<(s: SyncStatus) => void> = new Set();
   private data: Transaction[] = [];
-  private deletedIds: Set<string> = new Set();
-  private onlineState = true;
+  private queue: QueueOp[] = [];
+  private onlineState = navigator.onLine !== false;
+  private isSyncing = false;
+  private syncTimeout: any = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => { this.onlineState = true; this.notifyS({ syncing: false, lastSync: null, connected: true, error: null }); });
-      window.addEventListener('offline', () => { this.onlineState = false; this.notifyS({ syncing: false, lastSync: null, connected: false, error: null }); });
-      window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.syncDown(); });
-      window.addEventListener('focus', () => this.syncDown());
+      window.addEventListener('online', () => { 
+        this.onlineState = true; 
+        this.notifyS({ syncing: false, lastSync: null, connected: true, error: null, queueLength: this.queue.length }); 
+        this.processQueue();
+      });
+      window.addEventListener('offline', () => { 
+        this.onlineState = false; 
+        this.notifyS({ syncing: false, lastSync: null, connected: false, error: null, queueLength: this.queue.length }); 
+      });
+      window.addEventListener('visibilitychange', () => { 
+        if (document.visibilityState === 'visible') this.processQueue(); 
+      });
     }
   }
 
   async init(): Promise<void> {
-    this.notifyS({ syncing: true, lastSync: null, connected: this.onlineState, error: null });
+    // 1. Load from local cache instantly
     try {
-      const cloud = await pullCloud();
-      if (cloud && cloud.length > 0) {
-        this.data = normalize(cloud);
-      } else {
-        throw new Error('Cloud returned empty data');
+      const cached = localStorage.getItem(LOCAL_CACHE_KEY);
+      if (cached) {
+        this.data = JSON.parse(cached);
       }
-
-      const auto = autoAdvanceMonth(this.data);
-      if (auto?.transaction) {
-        this.data = [...this.data, auto.transaction];
-        try { localStorage.setItem(AUTO_ADVANCE_KEY, JSON.stringify({ from: 'May', to: auto.newMonth, net: auto.transaction.amount })); } catch {}
-        await this.pushToCloud();
-        await this.syncDown();
-        return;
+      const queued = localStorage.getItem(OFFLINE_QUEUE_KEY);
+      if (queued) {
+        this.queue = JSON.parse(queued);
       }
+    } catch (e) {
+        console.error("Failed to load cache:", e);
+    }
 
-      this.notify();
-      this.notifyS({ syncing: false, lastSync: Date.now(), connected: this.onlineState, error: null });
-    } catch (err) {
-      this.notifyS({ syncing: false, lastSync: null, connected: false, error: `Cloud load failed: ${err instanceof Error ? err.message : 'Unknown'}` });
+    this.notify();
+    this.notifyS({ syncing: true, lastSync: null, connected: this.onlineState, error: null, queueLength: this.queue.length });
+    
+    // 2. Fetch from cloud
+    await this.processQueue();
+  }
+
+  private persistLocal() {
+    try {
+      localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(this.data));
+      localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(this.queue));
+    } catch (e) {
+      console.error("Failed to persist to localStorage", e);
     }
   }
 
+  private enqueueOp(op: QueueOp) {
+    this.queue.push(op);
+    this.persistLocal();
+    this.notifyS({ syncing: false, lastSync: null, connected: this.onlineState, error: null, queueLength: this.queue.length });
+    this.processQueue();
+  }
+
+  private async processQueue() {
+    if (!this.onlineState || this.isSyncing) return;
+    this.isSyncing = true;
+    this.notifyS({ syncing: true, lastSync: null, connected: true, error: null, queueLength: this.queue.length });
+
+    try {
+        // First pull the latest from the cloud so we can merge
+        const res = await fetch('/api/data?t=' + Date.now());
+        if (res.ok) {
+            const cloudData = await res.json();
+            if (Array.isArray(cloudData)) {
+                // Apply our queue on top of cloud data
+                let merged = normalize(cloudData);
+                
+                // Track deleted IDs in queue
+                const deletedIds = new Set(this.queue.filter(q => q.action === 'delete').map(q => q.id));
+                merged = merged.filter(t => !deletedIds.has(t._id));
+
+                // Upsert modified/added from queue
+                for (const op of this.queue) {
+                    if (op.action === 'add' || op.action === 'update') {
+                        const idx = merged.findIndex(x => x._id === op.tx!._id);
+                        if (idx >= 0) merged[idx] = op.tx!;
+                        else merged.push(op.tx!);
+                    }
+                }
+                this.data = merged;
+                this.persistLocal();
+                this.notify();
+            }
+        }
+
+        // Push queue to cloud if there's anything
+        if (this.queue.length > 0) {
+            const payload = { operations: this.queue };
+            const postRes = await fetch('/api/data?t=' + Date.now(), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (postRes.ok) {
+                this.queue = [];
+                this.persistLocal();
+            } else {
+                throw new Error("Failed to push queue");
+            }
+        }
+        
+        this.notifyS({ syncing: false, lastSync: Date.now(), connected: true, error: null, queueLength: 0 });
+    } catch (err) {
+        this.notifyS({ syncing: false, lastSync: null, connected: this.onlineState, error: `Sync error: ${err instanceof Error ? err.message : 'Unknown'}`, queueLength: this.queue.length });
+    } finally {
+        this.isSyncing = false;
+        if (this.queue.length > 0 && this.onlineState) {
+            // Retry later
+            clearTimeout(this.syncTimeout);
+            this.syncTimeout = setTimeout(() => this.processQueue(), 10000);
+        }
+    }
+  }
+
+  // Same close logic as before
   closeMonth(month: string, year: number): void {
     const closed = getClosedMonths();
     const key = `${month}-${year}`;
@@ -174,14 +200,10 @@ class DB {
     };
 
     if (existing) {
-      this.data = this.data.map(t => t._id === existing._id ? openingTx : t);
+      await this.updateTransaction(openingTx);
     } else {
-      this.data = [...this.data, openingTx];
+      await this.addTransaction(openingTx);
     }
-
-    this.notify();
-    await this.pushToCloud();
-    await this.syncDown();
     return { month: nextMonth, year: nextYear, amount: net };
   }
 
@@ -205,59 +227,17 @@ class DB {
   }
 
   onSyncStatusChange(cb: (s: SyncStatus) => void): () => void {
-    this.ss.add(cb); cb({ syncing: false, lastSync: null, connected: this.onlineState, error: null }); return () => this.ss.delete(cb);
+    this.ss.add(cb); cb({ syncing: this.isSyncing, lastSync: null, connected: this.onlineState, error: null, queueLength: this.queue.length }); return () => this.ss.delete(cb);
   }
 
   getAllTransactions(): Transaction[] { return [...this.data]; }
   isOnline(): boolean { return this.onlineState; }
 
-  private async pushToCloud(): Promise<void> {
-    this.notifyS({ syncing: true, lastSync: null, connected: this.onlineState, error: null });
-    try {
-      // Merge with latest cloud data to prevent overwriting records from other sessions
-      try {
-        const cloud = await pullCloud();
-        if (cloud && cloud.length > 0) {
-          const cloudIds = new Set(cloud.map(t => t._id));
-          const localIds = new Set(this.data.map(t => t._id));
-          const missingFromLocal = cloud.filter(t => !localIds.has(t._id) && !this.deletedIds.has(t._id));
-          if (missingFromLocal.length > 0) {
-            this.data = normalize([...missingFromLocal, ...this.data]);
-          }
-        }
-      } catch {}
-      const payload = JSON.stringify(this.data);
-      const res = await fetch('/api/data?t=' + Date.now(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: payload,
-      });
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      this.notifyS({ syncing: false, lastSync: Date.now(), connected: true, error: null });
-    } catch (err) {
-      this.notifyS({ syncing: false, lastSync: null, connected: this.onlineState, error: `Cloud sync failed: ${err instanceof Error ? err.message : 'Unknown'}` });
-    }
-  }
-
-  private async syncDown(): Promise<void> {
-    try {
-      const res = await fetch('/api/data?t=' + Date.now());
-      if (res.ok) {
-        const cloud = await res.json();
-        if (Array.isArray(cloud) && cloud.length > 0) {
-          this.data = normalize(cloud);
-          this.notify();
-        }
-      }
-    } catch {}
-  }
-
   async addTransaction(tx: Transaction): Promise<void> {
     const t = normalize([tx])[0];
     this.data = [...this.data, t];
     this.notify();
-    await this.pushToCloud();
-    await this.syncDown();
+    this.enqueueOp({ action: 'add', tx: t, timestamp: Date.now() });
   }
 
   async updateTransaction(tx: Transaction): Promise<void> {
@@ -266,18 +246,14 @@ class DB {
     if (i >= 0) {
       this.data = this.data.map((x, j) => j === i ? t : x);
       this.notify();
-      await this.pushToCloud();
-      await this.syncDown();
+      this.enqueueOp({ action: 'update', tx: t, timestamp: Date.now() });
     }
   }
 
   async deleteTransaction(id: string): Promise<void> {
-    this.deletedIds.add(id);
     this.data = this.data.filter(x => x._id !== id);
     this.notify();
-    await this.pushToCloud();
-    await this.syncDown();
-    this.deletedIds.delete(id);
+    this.enqueueOp({ action: 'delete', id, timestamp: Date.now() });
   }
 
   exportData(): string { return JSON.stringify(this.data, null, 2); }
@@ -288,9 +264,18 @@ class DB {
       if (Array.isArray(p)) {
         this.data = normalize(p);
         this.notify();
-        await this.pushToCloud();
-        await this.syncDown();
-        return true;
+        this.queue = [];
+        // Force sync full data
+        const payload = JSON.stringify(this.data);
+        const res = await fetch('/api/data?t=' + Date.now(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+        });
+        if (res.ok) {
+           this.persistLocal();
+           return true;
+        }
       }
     } catch {}
     return false;
