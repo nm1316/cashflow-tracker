@@ -1,5 +1,5 @@
 const fs = require('fs');
-const data = JSON.parse(fs.readFileSync('cloud-backup.json', 'utf8'));
+const data = require('./backups/data-2026-10-01T10-40-22-445Z.json');
 let sql = '';
 for (const tx of data) {
     const _id = (tx._id || '').replace(/'/g, "''");
