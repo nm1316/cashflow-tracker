@@ -19,21 +19,21 @@ function formatDay(d) { return new Date(d+'T00:00:00').toLocaleDateString('en-GB
 function formatShort(d) { return new Date(d+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'}); }
 
 async function sendMessage(chatId, text, keyboard = null) {
-  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const url = `https://api.telegram.org/bot${bot_token}/sendMessage`;
   const body = { chat_id: chatId, text, parse_mode: 'HTML' };
   if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
   try { await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch {}
 }
 
 async function editMessage(chatId, messageId, text, keyboard = null) {
-  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`;
+  const url = `https://api.telegram.org/bot${bot_token}/editMessageText`;
   const body = { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML' };
   if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
   try { await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch {}
 }
 
 async function answerCallback(callbackQueryId, text = '') {
-  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`;
+  const url = `https://api.telegram.org/bot${bot_token}/answerCallbackQuery`;
   try { await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callback_query_id: callbackQueryId, text }) }); } catch {}
 }
 
