@@ -469,9 +469,9 @@ export async function onRequestPost(context) {
           await editMessage(chatId, msgId, '🗑️ No transactions to delete!', [[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]);
         } else {
           const last = txns[txns.length - 1];
-          const updated = d.filter(t => t._id !== last._id);
-          await pushData(updated);
-          const b = await getBalance(updated);
+          await deleteTransaction(last._id);
+          const fetchedNew = await fetchData();
+          const b = await getBalance(fetchedNew);
           await editMessage(chatId, msgId,
             `✅ <b>Deleted</b>\n\n${last.description}\nAED ${Math.abs(last.amount).toLocaleString()}\n\n💰 Balance: <b>AED ${b.balance.toLocaleString()}</b>`,
             [[{ text: '📱 Open App', url: APP_URL }],[{ text: '🔙 Menu', callback_data: 'cb_menu' }]]
@@ -518,9 +518,9 @@ export async function onRequestPost(context) {
         return;
       }
       const fetched = await fetchData();
-      const updated = [...fetched, ...txns];
-      const ok = await pushData(updated);
-      const b = await getBalance(updated);
+      const ok = await insertTransactions(txns);
+      const fetchedNew = await fetchData();
+      const b = await getBalance(fetchedNew);
       let reply = '';
       txns.forEach(t => {
         const icon = t.amount > 0 ? '💵' : '🛒';
@@ -595,9 +595,9 @@ export async function onRequestPost(context) {
         await sendMessage(chatId, '🗑️ No transactions to delete!');
       } else {
         const last = txns[txns.length - 1];
-        const updated = fetched.filter(t => t._id !== last._id);
-        await pushData(updated);
-        const b = await getBalance(updated);
+        await deleteTransaction(last._id);
+        const fetchedNew = await fetchData();
+        const b = await getBalance(fetchedNew);
         await sendMessage(chatId,
           `✅ <b>Deleted</b>\n\n${last.description}\nAED ${Math.abs(last.amount).toLocaleString()}\n\n💰 Balance: <b>AED ${b.balance.toLocaleString()}</b>`,
           [[{ text: '📱 Open App', url: APP_URL }]]
